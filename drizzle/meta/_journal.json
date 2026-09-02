@@ -1,5 +1,13 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1788351093856,
+      "tag": "0000_lonely_microbe",
+      "breakpoints": true
+    }
+  ]
 }

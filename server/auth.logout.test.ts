@@ -60,3 +60,18 @@ describe("auth.logout", () => {
     });
   });
 });
+
+describe("auth.me", () => {
+  it("returns the authenticated user for the dashboard shell", async () => {
+    const { ctx } = createAuthContext();
+    const caller = appRouter.createCaller(ctx);
+
+    const result = await caller.auth.me();
+
+    expect(result).toMatchObject({
+      id: 1,
+      openId: "sample-user",
+      role: "user",
+    });
+  });
+});
