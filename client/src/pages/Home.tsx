@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { trpc } from "@/lib/trpc";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -43,6 +44,12 @@ type Move = {
   detail: string;
   tag: string;
   icon: LucideIcon;
+};
+
+type ExtractedResume = {
+  fileName: string;
+  summary: string;
+  skills: { name: string; level: number; evidence: string }[];
 };
 
 const navItems: { key: NavKey; label: string; icon: LucideIcon }[] = [
@@ -96,6 +103,14 @@ const suggestedSkills: Skill[] = [
   { name: "System design", level: 12, tone: "pink" },
 ];
 
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read this file"));
+    reader.readAsDataURL(file);
+  });
+
 function ProgressRing({ value }: { value: number }) {
   return (
     <div
@@ -134,7 +149,17 @@ export default function Home() {
   const [completedMoves, setCompletedMoves] = useState<number[]>([2]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
+  const [extractedResume, setExtractedResume] = useState<ExtractedResume | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+  const extractResumeMutation = trpc.resume.extractSkills.useMutation({
+    onSuccess: (result) => {
+      const extracted = result as ExtractedResume;
+      setExtractedResume(extracted);
+      extracted.skills.forEach((skill) => addSkill({ name: skill.name, level: skill.level, tone: "mint" }));
+      toast.success(`${extracted.skills.length} skills extracted from your resume.`);
+    },
+    onError: (error) => toast.error(error.message || "Resume extraction failed. Please try again."),
+  });
 
   const displayName = user?.name || "Aarav Mehta";
   const firstName = displayName.split(" ")[0];
@@ -162,9 +187,33 @@ export default function Home() {
     setCompletedMoves((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
-  const handleResumeChange = (file?: File) => {
+  const handleResumeChange = async (file?: File) => {
     if (!file) return;
-    toast.success(`${file.name} added to your workspace. Resume parsing will be connected next.`);
+    const extension = file.name.toLowerCase().split(".").pop();
+    const mimeType = extension === "pdf"
+      ? "application/pdf"
+      : extension === "doc"
+        ? "application/msword"
+        : extension === "docx"
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : null;
+    if (!mimeType) {
+      toast.error("Upload a PDF, DOC or DOCX resume.");
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      toast.error("Resume must be 6 MB or smaller.");
+      return;
+    }
+    try {
+      toast.info("Uploading resume and reading your skill signal…");
+      const fileBase64 = await readFileAsDataUrl(file);
+      extractResumeMutation.mutate({ fileName: file.name, mimeType, fileBase64 });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not read this resume.");
+    } finally {
+      if (resumeInputRef.current) resumeInputRef.current.value = "";
+    }
   };
 
   return (
@@ -307,7 +356,7 @@ export default function Home() {
             </>
           ) : null}
 
-          {activeView === "profile" ? <ProfileView displayName={displayName} email={user?.email || "aarav.mehta@campus.edu"} skills={skills} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "profile" ? <ProfileView displayName={displayName} email={user?.email || "aarav.mehta@campus.edu"} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
           {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} /> : null}
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
           {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
@@ -317,9 +366,9 @@ export default function Home() {
   );
 }
 
-function ProfileView({ displayName, email, skills, onAddSkill, onUpload }: { displayName: string; email: string; skills: Skill[]; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
+function ProfileView({ displayName, email, skills, extraction, isExtracting, onAddSkill, onUpload }: { displayName: string; email: string; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UserRound size={14} /> YOUR PROFILE</p><h1>Make your signal clearer.</h1><p>Recruiters see your profile before they see your potential. Keep the signal sharp.</p></div><button className="primary-button" onClick={() => toast.success("Profile changes saved in this prototype.")}><Check size={16} /> Save changes</button></div>
-    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{displayName}</h2><p>{email}</p></div></div><div className="profile-fields"><label>Headline<input defaultValue="B.Tech CSE student · Frontend developer" /></label><label>University<input defaultValue="National Institute of Technology" /></label><label>Graduation year<input defaultValue="2026" /></label></div><button className="upload-card" onClick={onUpload}><div className="upload-icon"><Upload size={18} /></div><div><strong>Upload latest resume</strong><span>PDF or DOCX · up to 10 MB</span></div><ChevronRight size={17} /></button></section>
+    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{displayName}</h2><p>{email}</p></div></div><div className="profile-fields"><label>Headline<input defaultValue="B.Tech CSE student · Frontend developer" /></label><label>University<input defaultValue="National Institute of Technology" /></label><label>Graduation year<input defaultValue="2026" /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : "PDF, DOC or DOCX · up to 6 MB"}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
       <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} /><div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div><div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div></section></div>
   </div>;
 }
