@@ -48,7 +48,9 @@ type Move = {
 
 type ExtractedResume = {
   fileName: string;
+  resumeId: number;
   summary: string;
+  reviewNotes: string;
   skills: { name: string; level: number; evidence: string }[];
 };
 
@@ -159,6 +161,10 @@ export default function Home() {
       toast.success(`${extracted.skills.length} skills extracted from your resume.`);
     },
     onError: (error) => toast.error(error.message || "Resume extraction failed. Please try again."),
+  });
+  const saveResumeMutation = trpc.resume.saveEdits.useMutation({
+    onSuccess: () => toast.success("Your edited skills were saved."),
+    onError: (error) => toast.error(error.message || "Could not save skill edits."),
   });
 
   const displayName = user?.name || "Aarav Mehta";
@@ -356,7 +362,7 @@ export default function Home() {
             </>
           ) : null}
 
-          {activeView === "profile" ? <ProfileView displayName={displayName} email={user?.email || "aarav.mehta@campus.edu"} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "profile" ? <ProfileView displayName={displayName} email={user?.email || "aarav.mehta@campus.edu"} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
           {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} /> : null}
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
           {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
@@ -366,11 +372,16 @@ export default function Home() {
   );
 }
 
-function ProfileView({ displayName, email, skills, extraction, isExtracting, onAddSkill, onUpload }: { displayName: string; email: string; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
+function ProfileView({ displayName, email, skills, extraction, isExtracting, isSaving, onSaveExtraction, onAddSkill, onUpload }: { displayName: string; email: string; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; isSaving: boolean; onSaveExtraction: (next: ExtractedResume) => void; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UserRound size={14} /> YOUR PROFILE</p><h1>Make your signal clearer.</h1><p>Recruiters see your profile before they see your potential. Keep the signal sharp.</p></div><button className="primary-button" onClick={() => toast.success("Profile changes saved in this prototype.")}><Check size={16} /> Save changes</button></div>
     <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{displayName}</h2><p>{email}</p></div></div><div className="profile-fields"><label>Headline<input defaultValue="B.Tech CSE student · Frontend developer" /></label><label>University<input defaultValue="National Institute of Technology" /></label><label>Graduation year<input defaultValue="2026" /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : "PDF, DOC or DOCX · up to 6 MB"}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
-      <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} /><div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div><div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div></section></div>
+       <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} />{extraction ? <EditableExtraction extraction={extraction} isSaving={isSaving} onSave={onSaveExtraction} /> : null}<div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div><div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div></section></div>
   </div>;
+}
+
+function EditableExtraction({ extraction, isSaving, onSave }: { extraction: ExtractedResume; isSaving: boolean; onSave: (next: ExtractedResume) => void }) {
+  const [draft, setDraft] = useState(extraction);
+  return <div className="edit-review-box"><div className="edit-review-heading"><span className="eyebrow eyebrow--green"><Sparkles size={13} /> SECOND AI REVIEW</span><span>Review and edit before saving</span></div>{draft.skills.map((skill, index) => <div className="edit-skill-row" key={`${skill.name}-${index}`}><input value={skill.name} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) })} /><input type="number" min="1" max="100" value={skill.level} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, level: Number(event.target.value) } : item) })} /><button className="remove-skill" onClick={() => setDraft({ ...draft, skills: draft.skills.filter((_, itemIndex) => itemIndex !== index) })}><X size={13} /></button></div>)}<button className="text-button" onClick={() => setDraft({ ...draft, skills: [...draft.skills, { name: "New skill", level: 50, evidence: "Added by student" }] })}><Plus size={13} /> Add skill</button><button className="dark-button dark-button--small save-review-button" disabled={isSaving} onClick={() => onSave(draft)}>{isSaving ? "Saving…" : "Save reviewed skills"} <Check size={14} /></button></div>;
 }
 
 function RoadmapView({ completedMoves, onToggle, onBack }: { completedMoves: number[]; onToggle: (id: number) => void; onBack: () => void }) {

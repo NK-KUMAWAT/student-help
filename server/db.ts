@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertResume, InsertUser, resumes, users } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -74,4 +74,13 @@ export async function getLatestResume(userId: number) {
   if (!db) return undefined;
   const result = await db.select().from(resumes).where(eq(resumes.userId, userId)).orderBy(desc(resumes.createdAt)).limit(1);
   return result[0];
+}
+
+export async function updateResumeSkills(id: number, userId: number, extractedSkills: string) {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.update(resumes)
+    .set({ extractedSkills })
+    .where(and(eq(resumes.id, id), eq(resumes.userId, userId)));
+  return Boolean(result);
 }

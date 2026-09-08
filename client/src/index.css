@@ -221,3 +221,13 @@ h1 { margin-bottom: 11px; color: #192a2e; font-size: clamp(31px, 3.3vw, 45px); l
 .extracted-skill .skill-track { display: block; width: 100%; margin-top: 8px; }
 .extracted-skill small { display: block; overflow: hidden; margin-top: 7px; color: #98a9a0; font-size: 7px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) { .extracted-skill-grid { grid-template-columns: 1fr; } }
+
+.edit-review-box { margin-top: 16px; padding: 12px; border: 1px solid #d7e9dc; border-radius: 9px; background: #f7fcf8; }
+.edit-review-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: #82988b; font-size: 8px; }
+.edit-review-heading .eyebrow { margin: 0; }
+.edit-skill-row { display: flex; gap: 6px; margin-top: 7px; }
+.edit-skill-row input { min-width: 0; flex: 1; height: 29px; padding: 0 7px; border: 1px solid #dfeae2; border-radius: 6px; color: #456456; background: #fff; font-size: 9px; }
+.edit-skill-row input[type="number"] { max-width: 53px; text-align: center; }
+.remove-skill { width: 29px; display: grid; place-items: center; border: 0; border-radius: 6px; color: #b77d7d; background: #faeded; }
+.save-review-button { width: 100%; margin-top: 10px; }
+.edit-review-box > .text-button { margin-top: 9px; font-size: 9px; }

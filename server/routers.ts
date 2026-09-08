@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
-import { createResume } from "./db";
+import { createResume, getLatestResume, updateResumeSkills } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -28,6 +28,29 @@ const extractedSkillsSchema = {
     summary: { type: "string" },
   },
   required: ["skills", "summary"],
+  additionalProperties: false,
+};
+
+const reviewedSkillsSchema = {
+  type: "object",
+  properties: {
+    skills: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          level: { type: "integer", minimum: 1, maximum: 100 },
+          evidence: { type: "string" },
+        },
+        required: ["name", "level", "evidence"],
+        additionalProperties: false,
+      },
+    },
+    summary: { type: "string" },
+    reviewNotes: { type: "string" },
+  },
+  required: ["skills", "summary", "reviewNotes"],
   additionalProperties: false,
 };
 
@@ -69,8 +92,27 @@ export const appRouter = router({
         });
         const content = response.choices[0]?.message.content;
         const parsed = JSON.parse(typeof content === "string" ? content : content.map(part => part.type === "text" ? part.text : "").join(""));
-        await createResume({ userId: ctx.user.id, fileName: input.fileName, mimeType: input.mimeType, storageKey: key, extractedSkills: JSON.stringify(parsed) });
-        return { fileName: input.fileName, url, ...parsed };
+        const review = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are the second resume-review agent. Normalize duplicate skills, correct obvious naming inconsistencies, remove unsupported skills, keep evidence grounded in the supplied extraction, and produce a concise student-friendly review note." },
+            { role: "user", content: `Review this first-agent resume extraction and return the corrected final skill list as JSON:\n${JSON.stringify(parsed)}` },
+          ],
+          response_format: { type: "json_schema", json_schema: { name: "reviewed_resume_skills", strict: true, schema: reviewedSkillsSchema } },
+          max_tokens: 1400,
+        });
+        const reviewedContent = review.choices[0]?.message.content;
+        const reviewed = JSON.parse(typeof reviewedContent === "string" ? reviewedContent : reviewedContent.map(part => part.type === "text" ? part.text : "").join(""));
+        const resumeResult = await createResume({ userId: ctx.user.id, fileName: input.fileName, mimeType: input.mimeType, storageKey: key, extractedSkills: JSON.stringify(reviewed) });
+        return { fileName: input.fileName, url, resumeId: Number((resumeResult as { insertId?: number } | undefined)?.insertId || 0), ...reviewed };
+      }),
+    saveEdits: protectedProcedure
+      .input(z.object({ resumeId: z.number().int().positive(), skills: z.array(z.object({ name: z.string().min(1).max(80), level: z.number().int().min(1).max(100), evidence: z.string().max(240) })).max(40), summary: z.string().max(1000), reviewNotes: z.string().max(1000) }))
+      .mutation(async ({ input, ctx }) => {
+        const latest = await getLatestResume(ctx.user.id);
+        if (!latest || latest.id !== input.resumeId) throw new Error("Resume not found or no longer editable");
+        const saved = await updateResumeSkills(input.resumeId, ctx.user.id, JSON.stringify({ skills: input.skills, summary: input.summary, reviewNotes: input.reviewNotes }));
+        if (!saved) throw new Error("Could not save resume edits");
+        return { success: true as const };
       }),
   }),
 });
