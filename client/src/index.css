@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #eef7f1;
+  --background: #f7f9f6;
   --foreground: #17252a;
   --card: #ffffff;
   --card-foreground: #17252a;
@@ -31,7 +31,7 @@ button:active { transform: scale(0.98); }
 button:focus-visible, input:focus-visible { outline: 3px solid rgba(66, 151, 116, 0.25); outline-offset: 2px; }
 
 /* App shell */
-.app-shell { min-height: 100vh; display: flex; background: #eef7f1; }
+.app-shell { min-height: 100vh; display: flex; background: #f7f9f6; }
 .app-sidebar { width: 248px; flex: 0 0 248px; min-height: 100vh; padding: 25px 17px 17px; display: flex; flex-direction: column; background: #132a27; color: #e7f1ec; position: sticky; top: 0; z-index: 30; }
 .brand-lockup { min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 9px; }
 .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; background: #b6efcf; color: #174d40; border-radius: 9px; transform: rotate(-8deg); }
@@ -69,7 +69,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(66, 151, 116
 .sidebar-more { padding: 3px; border: 0; background: transparent; color: #78988e; }
 
 .main-content { min-width: 0; flex: 1; }
-.topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid #dcebe1; background: rgba(238,247,241,0.92); position: relative; }
+.topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid #dcebe1; background: rgba(247,249,246,0.92); position: relative; }
 .breadcrumbs { display: flex; align-items: center; gap: 7px; color: #9aa9a3; font-size: 11px; }
 .breadcrumbs strong { color: #344640; font-weight: 800; }
 .topbar-actions { display: flex; align-items: center; gap: 17px; }
