@@ -298,9 +298,14 @@ export default function Home() {
   };
 
   const handleSaveProfile = () => {
+    const name = profileDraft.name.trim() || user?.name?.trim() || "";
+    if (name.length < 2) {
+      toast.error("Please enter your name before saving your profile.");
+      return;
+    }
     const graduationYear = profileDraft.graduationYear.trim();
     profileMutation.mutate({
-      name: profileDraft.name.trim(),
+      name,
       headline: profileDraft.headline.trim(),
       university: profileDraft.university.trim(),
       graduationYear: graduationYear ? Number(graduationYear) : null,

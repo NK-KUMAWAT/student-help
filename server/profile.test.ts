@@ -39,8 +39,8 @@ describe("profile", () => {
     await expect(caller.profile.update({ name: "New Name", headline: "Student", university: "Campus", graduationYear: 2026 })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
-  it("rejects an empty profile name before reaching the database", async () => {
-    const caller = appRouter.createCaller(createContext(user));
+  it("rejects an empty profile name only when the account has no fallback name", async () => {
+    const caller = appRouter.createCaller(createContext({ ...user, name: null }));
     await expect(caller.profile.update({ name: "", headline: "", university: "", graduationYear: null })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

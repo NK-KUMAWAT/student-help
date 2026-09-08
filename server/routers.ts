@@ -74,14 +74,18 @@ export const appRouter = router({
     me: protectedProcedure.query(({ ctx }) => ctx.user),
     update: protectedProcedure
       .input(z.object({
-        name: z.string().trim().min(2).max(120),
+        name: z.string().trim().max(120).optional(),
         headline: z.string().trim().max(200),
         university: z.string().trim().max(200),
         graduationYear: z.number().int().min(1900).max(2100).nullable(),
       }))
       .mutation(async ({ input, ctx }) => {
+        const name = input.name?.trim() || ctx.user.name?.trim() || "";
+        if (name.length < 2) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Please enter your name before saving your profile" });
+        }
         const updated = await updateUserProfile(ctx.user.id, {
-          name: input.name,
+          name,
           headline: input.headline || null,
           university: input.university || null,
           graduationYear: input.graduationYear,
