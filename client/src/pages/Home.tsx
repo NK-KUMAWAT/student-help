@@ -19,6 +19,8 @@ import {
   GraduationCap,
   LayoutDashboard,
   LifeBuoy,
+  LogIn,
+  LogOut,
   Mail,
   MessageCircle,
   Menu,
@@ -29,6 +31,7 @@ import {
   Target,
   Trophy,
   Upload,
+  UserPlus,
   UserRound,
   UsersRound,
   Wallet,
@@ -61,6 +64,13 @@ type ExtractedResume = {
   summary: string;
   reviewNotes: string;
   skills: { name: string; level: number; evidence: string }[];
+};
+
+type ProfileDraft = {
+  name: string;
+  headline: string;
+  university: string;
+  graduationYear: string;
 };
 
 const navItems: { key: NavKey; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
@@ -156,8 +166,10 @@ function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: st
 }
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, loading, error, logout } = useAuth();
+  const utils = trpc.useUtils();
   const [activeView, setActiveView] = useState<NavKey>("overview");
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>({ name: "", headline: "", university: "", graduationYear: "" });
   const [skills, setSkills] = useState<Skill[]>(initialSkills);
   const [completedMoves, setCompletedMoves] = useState<number[]>([2]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -196,8 +208,26 @@ export default function Home() {
     onSuccess: (response) => setChatMessages((current) => [...current, { role: "assistant", content: response.content }]),
     onError: (error) => toast.error(error.message || "The Help Center assistant is unavailable right now."),
   });
+  const profileMutation = trpc.profile.update.useMutation({
+    onSuccess: async (updated) => {
+      utils.auth.me.setData(undefined, updated);
+      await utils.auth.me.invalidate();
+      toast.success("Your profile is saved.");
+    },
+    onError: (profileError) => toast.error(profileError.message || "Could not save your profile."),
+  });
 
-  const displayName = user?.name || "Aarav Mehta";
+  useEffect(() => {
+    if (!user) return;
+    setProfileDraft({
+      name: user.name || "",
+      headline: user.headline || "",
+      university: user.university || "",
+      graduationYear: user.graduationYear ? String(user.graduationYear) : "",
+    });
+  }, [user?.id, user?.name, user?.headline, user?.university, user?.graduationYear]);
+
+  const displayName = user?.name || "Student";
   const firstName = displayName.split(" ")[0];
   const profileCompletion = Math.min(100, 62 + (skills.length - initialSkills.length) * 6);
   const filteredJobs = useMemo(
@@ -258,6 +288,28 @@ export default function Home() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("You’re logged out safely.");
+    } catch (logoutError) {
+      toast.error(logoutError instanceof Error ? logoutError.message : "Could not log out. Please try again.");
+    }
+  };
+
+  const handleSaveProfile = () => {
+    const graduationYear = profileDraft.graduationYear.trim();
+    profileMutation.mutate({
+      name: profileDraft.name.trim(),
+      headline: profileDraft.headline.trim(),
+      university: profileDraft.university.trim(),
+      graduationYear: graduationYear ? Number(graduationYear) : null,
+    });
+  };
+
+  if (loading) return <AuthLoadingScreen />;
+  if (!user) return <AuthLanding error={Boolean(error)} />;
+
   return (
     <div className="app-shell">
       <aside className={`app-sidebar ${mobileNavOpen ? "is-open" : ""}`}>
@@ -313,10 +365,11 @@ export default function Home() {
           <button className="mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={20} /></button>
           <div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.key === activeView)?.label}</strong></div>
           <div className="topbar-actions">
-            <span className="demo-pill"><span /> Demo workspace</span>
+            <span className="demo-pill"><span /> Account active</span>
             <span className="live-clock"><Clock3 size={14} /> {now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} · {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
             <button className="icon-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18} />{notifications.some((notification) => !notification.read) ? <i /> : null}</button>
             <button className="top-avatar" onClick={() => changeView("profile")} aria-label="Open profile">{displayName.charAt(0).toUpperCase()}</button>
+            <button className="icon-button" onClick={handleLogout} aria-label="Log out" title="Log out"><LogOut size={17} /></button>
           </div>
           {notificationsOpen ? <div className="notification-panel"><div className="notification-panel__heading"><div><p className="eyebrow eyebrow--green"><Bell size={13} /> NOTIFICATIONS</p><strong>Stay in the loop</strong></div><button className="text-button" onClick={() => setNotifications((current) => current.map((notification) => ({ ...notification, read: true })))}>Mark all read</button></div><div className="notification-list">{notifications.map((notification) => <button className={`notification-item ${notification.read ? "is-read" : ""}`} key={notification.id} onClick={() => setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read: true } : item))}><span className="notification-item__dot" /><span><strong>{notification.title}</strong><small>{notification.body}</small><em>{notification.time}</em></span></button>)}</div></div> : null}
         </header>
@@ -400,7 +453,7 @@ export default function Home() {
             </>
           ) : null}
 
-          {activeView === "profile" ? <ProfileView displayName={displayName} email={user?.email || "aarav.mehta@campus.edu"} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "profile" ? <ProfileView displayName={displayName} email={user.email || ""} profile={profileDraft} isProfileSaving={profileMutation.isPending} onProfileChange={(field, value) => setProfileDraft((current) => ({ ...current, [field]: value }))} onSaveProfile={handleSaveProfile} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
           {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} /> : null}
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
           {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
@@ -413,9 +466,17 @@ export default function Home() {
   );
 }
 
-function ProfileView({ displayName, email, skills, extraction, isExtracting, isSaving, onSaveExtraction, onAddSkill, onUpload }: { displayName: string; email: string; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; isSaving: boolean; onSaveExtraction: (next: ExtractedResume) => void; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
-  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UserRound size={14} /> YOUR PROFILE</p><h1>Make your signal clearer.</h1><p>Recruiters see your profile before they see your potential. Keep the signal sharp.</p></div><button className="primary-button" onClick={() => toast.success("Profile changes saved in this prototype.")}><Check size={16} /> Save changes</button></div>
-    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{displayName}</h2><p>{email}</p></div></div><div className="profile-fields"><label>Headline<input defaultValue="B.Tech CSE student · Frontend developer" /></label><label>University<input defaultValue="National Institute of Technology" /></label><label>Graduation year<input defaultValue="2026" /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : "PDF, DOC or DOCX · up to 6 MB"}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
+function AuthLoadingScreen() {
+  return <div className="auth-screen"><div className="auth-loading-card"><div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div><div><strong>Opening your workspace</strong><span>Checking your account securely…</span></div><Sparkles size={17} className="spin-slow" /></div></div>;
+}
+
+function AuthLanding({ error }: { error: boolean }) {
+  return <div className="auth-screen"><div className="auth-orbit auth-orbit--one" /><div className="auth-orbit auth-orbit--two" /><main className="auth-card"><div className="auth-card__brand"><div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div><div><strong>student care help</strong><span>support for every student</span></div></div><div className="auth-card__content"><p className="eyebrow eyebrow--green"><span className="status-dot" /> YOUR CAREER WORKSPACE</p><h1>Build a profile that feels like <span>you.</span></h1><p className="auth-card__copy">Save your skills, resume signal, roadmap, and role matches in one calm workspace made for your next opportunity.</p>{error ? <div className="auth-alert"><CircleHelp size={15} /><span>Your session ended. Log in again to reopen your workspace.</span></div> : null}<div className="auth-actions"><button className="primary-button auth-button" onClick={() => startLogin()}><LogIn size={16} /> Log in</button><button className="quiet-button auth-secondary" onClick={() => startLogin()}><UserPlus size={16} /> Create account</button></div><p className="auth-note">New here? Choose <strong>Create account</strong>. Already have an account? Choose <strong>Log in</strong>. Both options use secure Manus authentication.</p></div><div className="auth-card__footer"><span><ShieldCheck size={14} /> Secure sign-in</span><span><UserRound size={14} /> Personal profile</span><span><Target size={14} /> Clear next steps</span></div></main></div>;
+}
+
+function ProfileView({ displayName, email, profile, isProfileSaving, onProfileChange, onSaveProfile, skills, extraction, isExtracting, isSaving, onSaveExtraction, onAddSkill, onUpload }: { displayName: string; email: string; profile: ProfileDraft; isProfileSaving: boolean; onProfileChange: (field: keyof ProfileDraft, value: string) => void; onSaveProfile: () => void; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; isSaving: boolean; onSaveExtraction: (next: ExtractedResume) => void; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
+  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UserRound size={14} /> YOUR PROFILE</p><h1>Make your signal clearer.</h1><p>Recruiters see your profile before they see your potential. Keep the signal sharp.</p></div><button className="primary-button" onClick={onSaveProfile} disabled={isProfileSaving}><Check size={16} /> {isProfileSaving ? "Saving…" : "Save changes"}</button></div>
+    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{(profile.name || displayName).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{profile.name || displayName}</h2><p>{email || "Add an email through account sign-in"}</p></div></div><div className="profile-fields"><label>Full name<input value={profile.name} onChange={(event) => onProfileChange("name", event.target.value)} placeholder="Your name" /></label><label>Headline<input value={profile.headline} onChange={(event) => onProfileChange("headline", event.target.value)} placeholder="B.Tech CSE student · Frontend developer" /></label><label>University<input value={profile.university} onChange={(event) => onProfileChange("university", event.target.value)} placeholder="Your university" /></label><label>Graduation year<input value={profile.graduationYear} onChange={(event) => onProfileChange("graduationYear", event.target.value.replace(/[^0-9]/g, "").slice(0, 4))} inputMode="numeric" placeholder="2026" /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : "PDF, DOC or DOCX · up to 6 MB"}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
        <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} />{extraction ? <EditableExtraction extraction={extraction} isSaving={isSaving} onSave={onSaveExtraction} /> : null}<div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div><div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div></section></div>
   </div>;
 }

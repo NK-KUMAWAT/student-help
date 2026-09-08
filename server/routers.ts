@@ -4,7 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { createResume, createUpiVerification, createWithdrawalRequest, getAllWithdrawalRequests, getLatestResume, getLatestUpiVerification, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills, updateWithdrawalRequestStatus } from "./db";
+import { createResume, createUpiVerification, createWithdrawalRequest, getAllWithdrawalRequests, getLatestResume, getLatestUpiVerification, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills, updateWithdrawalRequestStatus, updateUserProfile } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -69,6 +69,26 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+  }),
+  profile: router({
+    me: protectedProcedure.query(({ ctx }) => ctx.user),
+    update: protectedProcedure
+      .input(z.object({
+        name: z.string().trim().min(2).max(120),
+        headline: z.string().trim().max(200),
+        university: z.string().trim().max(200),
+        graduationYear: z.number().int().min(1900).max(2100).nullable(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const updated = await updateUserProfile(ctx.user.id, {
+          name: input.name,
+          headline: input.headline || null,
+          university: input.university || null,
+          graduationYear: input.graduationYear,
+        });
+        if (!updated) throw new Error("Could not save your profile right now");
+        return updated;
+      }),
   }),
   resume: router({
     extractSkills: protectedProcedure

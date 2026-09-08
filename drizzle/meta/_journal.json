@@ -36,6 +36,13 @@
       "when": 1788865545744,
       "tag": "0004_bright_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1788871181601,
+      "tag": "0005_careful_mephistopheles",
+      "breakpoints": true
     }
   ]
 }

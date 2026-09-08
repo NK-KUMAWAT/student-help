@@ -59,6 +59,14 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
+export async function updateUserProfile(userId: number, profile: Pick<InsertUser, "name" | "headline" | "university" | "graduationYear">) {
+  const db = await getDb();
+  if (!db) return undefined;
+  await db.update(users).set({ ...profile, updatedAt: new Date() }).where(eq(users.id, userId));
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result[0];
+}
+
 export async function createResume(resume: InsertResume) {
   const db = await getDb();
   if (!db) {
