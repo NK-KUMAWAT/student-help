@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f7f9f6;
+  --background: #eef7f1;
   --foreground: #17252a;
   --card: #ffffff;
   --card-foreground: #17252a;
@@ -31,7 +31,7 @@ button:active { transform: scale(0.98); }
 button:focus-visible, input:focus-visible { outline: 3px solid rgba(66, 151, 116, 0.25); outline-offset: 2px; }
 
 /* App shell */
-.app-shell { min-height: 100vh; display: flex; background: #f7f9f6; }
+.app-shell { min-height: 100vh; display: flex; background: #eef7f1; }
 .app-sidebar { width: 248px; flex: 0 0 248px; min-height: 100vh; padding: 25px 17px 17px; display: flex; flex-direction: column; background: #132a27; color: #e7f1ec; position: sticky; top: 0; z-index: 30; }
 .brand-lockup { min-height: 43px; display: flex; align-items: center; gap: 10px; padding: 0 9px; }
 .brand-mark { width: 29px; height: 29px; display: grid; place-items: center; background: #b6efcf; color: #174d40; border-radius: 9px; transform: rotate(-8deg); }
@@ -69,7 +69,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(66, 151, 116
 .sidebar-more { padding: 3px; border: 0; background: transparent; color: #78988e; }
 
 .main-content { min-width: 0; flex: 1; }
-.topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid #e6ece8; background: rgba(247,249,246,0.9); }
+.topbar { height: 76px; display: flex; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid #dcebe1; background: rgba(238,247,241,0.92); position: relative; }
 .breadcrumbs { display: flex; align-items: center; gap: 7px; color: #9aa9a3; font-size: 11px; }
 .breadcrumbs strong { color: #344640; font-weight: 800; }
 .topbar-actions { display: flex; align-items: center; gap: 17px; }
@@ -79,6 +79,10 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(66, 151, 116
 .icon-button:hover { background: #e9efeb; color: #174d40; }
 .icon-button i { position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 99px; background: #db7d69; border: 1px solid #f7f9f6; }
 .top-avatar { width: 29px; height: 29px; display: grid; place-items: center; border: 0; border-radius: 9px; background: #f6c38c; color: #5c3d22; font-size: 11px; font-weight: 800; }
+.notification-panel { position: absolute; z-index: 40; top: 62px; right: 42px; width: 330px; overflow: hidden; border: 1px solid #d9e9df; border-radius: 12px; background: #fff; box-shadow: 0 18px 42px rgba(33, 76, 55, .16); }
+.notification-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 15px 16px 12px; border-bottom: 1px solid #edf2ee; }
+.notification-panel__heading .eyebrow { margin-bottom: 6px; font-size: 8px; }.notification-panel__heading strong { color: #345447; font-size: 12px; }.notification-panel__heading .text-button { min-height: 20px; font-size: 8px; }
+.notification-list { max-height: 330px; overflow-y: auto; }.notification-item { width: 100%; display: flex; gap: 9px; padding: 13px 16px; border: 0; border-bottom: 1px solid #f0f3f1; background: #f7fcf8; color: inherit; text-align: left; }.notification-item:hover { background: #eef9f1; }.notification-item.is-read { background: #fff; }.notification-item__dot { width: 7px; height: 7px; flex: 0 0 auto; margin-top: 4px; border-radius: 50%; background: #56a77c; box-shadow: 0 0 0 3px rgba(86,167,124,.13); }.notification-item.is-read .notification-item__dot { background: #cbdad1; box-shadow: none; }.notification-item strong, .notification-item small, .notification-item em { display: block; }.notification-item strong { color: #3c594b; font-size: 10px; }.notification-item small { margin-top: 4px; color: #81948a; font-size: 9px; line-height: 1.45; }.notification-item em { margin-top: 5px; color: #a2b0a8; font-family: "DM Mono", monospace; font-size: 7px; font-style: normal; }
 .page-wrap { max-width: 1380px; margin: 0 auto; padding: 39px 42px 66px; }
 .welcome-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .eyebrow { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; color: #8c9d96; font-family: "DM Mono", monospace; font-size: 9px; line-height: 1; font-weight: 700; letter-spacing: 0.13em; }
@@ -248,3 +252,5 @@ h1 { margin-bottom: 11px; color: #192a2e; font-size: clamp(31px, 3.3vw, 45px); l
 .admin-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }.admin-metric { padding: 16px 18px; border: 1px solid #e1ebe4; border-radius: 10px; background: #fff; }.admin-metric span, .admin-metric small { display: block; color: #8b9b92; font-family: "DM Mono", monospace; font-size: 8px; }.admin-metric strong { display: block; margin: 9px 0 4px; color: #257454; font-size: 26px; letter-spacing: -.06em; }.admin-metric small { font-family: "Manrope", sans-serif; }.admin-withdrawal-panel { padding: 22px; }.admin-panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }.admin-panel-heading h2 { margin-top: 6px; color: #324e42; font-size: 19px; letter-spacing: -.05em; }.admin-refresh-label { padding: 6px 8px; border-radius: 5px; color: #4e8a6c; background: #edf8ef; font-family: "DM Mono", monospace; font-size: 7px; text-transform: uppercase; }.admin-request-list { margin-top: 16px; }.admin-request-row { display: grid; grid-template-columns: minmax(180px,1.2fr) 85px minmax(130px,1fr) 100px 82px minmax(150px,.9fr); align-items: center; gap: 12px; min-height: 76px; border-top: 1px solid #edf1ee; }.admin-request-user { display: flex; align-items: center; gap: 9px; min-width: 0; }.admin-request-user > div:last-child { min-width: 0; }.admin-request-user strong, .admin-request-user span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.admin-request-user strong { color: #425c4f; font-size: 10px; }.admin-request-user span { margin-top: 3px; color: #95a49c; font-size: 8px; }.admin-request-detail span, .admin-request-detail strong { display: block; }.admin-request-detail span { color: #9aa9a2; font-family: "DM Mono", monospace; font-size: 7px; }.admin-request-detail strong { margin-top: 5px; overflow: hidden; color: #536b5e; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }.admin-status { width: max-content; padding: 5px 6px; border-radius: 5px; font-family: "DM Mono", monospace; font-size: 7px; text-transform: uppercase; }.admin-status--requested { color: #ad763f; background: #fff1de; }.admin-status--processing { color: #547ca4; background: #e8f1fb; }.admin-status--paid { color: #388262; background: #e1f4e7; }.admin-status--rejected { color: #aa6666; background: #faeaea; }.admin-request-actions { display: flex; justify-content: flex-end; gap: 5px; }.admin-action { display: inline-flex; align-items: center; gap: 4px; min-height: 27px; padding: 0 7px; border: 0; border-radius: 5px; font-size: 8px; font-weight: 800; }.admin-action:disabled { cursor: wait; opacity: .5; }.admin-action--approve { color: #2d7a5b; background: #e3f5e8; }.admin-action--reject { color: #a76565; background: #fbeded; }.admin-empty { min-height: 180px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; color: #9aa9a2; text-align: center; }.admin-empty strong { color: #527062; font-size: 11px; }.admin-empty p { margin: 0; font-size: 9px; }.admin-empty svg { color: #5ca47c; }
 @media (max-width: 1000px) { .admin-request-row { grid-template-columns: minmax(160px,1.1fr) 75px minmax(120px,1fr) 90px; padding: 12px 0; }.admin-request-row > .admin-status { grid-column: 3; grid-row: 2; }.admin-request-actions { grid-column: 4; grid-row: 2; } }
 @media (max-width: 760px) { .admin-metrics { grid-template-columns: 1fr; gap: 8px; }.admin-metric { min-height: 80px; }.admin-withdrawal-panel { padding: 16px; }.admin-request-row { grid-template-columns: minmax(0,1fr) auto; gap: 9px; }.admin-request-user { grid-column: 1 / -1; }.admin-request-detail:nth-of-type(2), .admin-request-detail:nth-of-type(3) { grid-column: 1; }.admin-request-detail:nth-of-type(4) { grid-column: 2; grid-row: 2; }.admin-request-row > .admin-status { grid-column: 1; grid-row: 4; }.admin-request-actions { grid-column: 2; grid-row: 4; } }
+
+@media (max-width: 760px) { .notification-panel { top: 59px; right: 14px; left: 14px; width: auto; } }

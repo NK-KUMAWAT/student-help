@@ -161,6 +161,12 @@ export default function Home() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
   const [now, setNow] = useState(() => new Date());
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([
+    { id: 1, title: "New role match", body: "Your profile is a strong match for React Developer at Northstar AI.", time: "12 min ago", read: false },
+    { id: 2, title: "Roadmap sprint ready", body: "Your next DSA practice sprint is ready to start.", time: "1 hr ago", read: false },
+    { id: 3, title: "Resume signal improved", body: "Your latest AI review added 3 new skills to your profile.", time: "Yesterday", read: true },
+  ]);
   const [extractedResume, setExtractedResume] = useState<ExtractedResume | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -293,9 +299,10 @@ export default function Home() {
           <div className="topbar-actions">
             <span className="demo-pill"><span /> Demo workspace</span>
             <span className="live-clock"><Clock3 size={14} /> {now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} · {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
-            <button className="icon-button" onClick={() => toast.info("You're all caught up.")} aria-label="Notifications"><Bell size={18} /><i /></button>
+            <button className="icon-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18} />{notifications.some((notification) => !notification.read) ? <i /> : null}</button>
             <button className="top-avatar" onClick={() => changeView("profile")} aria-label="Open profile">{displayName.charAt(0).toUpperCase()}</button>
           </div>
+          {notificationsOpen ? <div className="notification-panel"><div className="notification-panel__heading"><div><p className="eyebrow eyebrow--green"><Bell size={13} /> NOTIFICATIONS</p><strong>Stay in the loop</strong></div><button className="text-button" onClick={() => setNotifications((current) => current.map((notification) => ({ ...notification, read: true })))}>Mark all read</button></div><div className="notification-list">{notifications.map((notification) => <button className={`notification-item ${notification.read ? "is-read" : ""}`} key={notification.id} onClick={() => setNotifications((current) => current.map((item) => item.id === notification.id ? { ...item, read: true } : item))}><span className="notification-item__dot" /><span><strong>{notification.title}</strong><small>{notification.body}</small><em>{notification.time}</em></span></button>)}</div></div> : null}
         </header>
 
         <div className="page-wrap">
