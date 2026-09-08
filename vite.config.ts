@@ -170,6 +170,12 @@ export default defineConfig({
   },
   server: {
     host: true,
+    // The managed preview proxies HTTPS traffic to the dev server. Tell the
+    // browser to use the public secure websocket instead of localhost:5173.
+    hmr: {
+      protocol: "wss",
+      clientPort: 443,
+    },
     allowedHosts: [
       ".manuspre.computer",
       ".manus.computer",
