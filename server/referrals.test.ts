@@ -39,4 +39,9 @@ describe("referrals", () => {
     const caller = appRouter.createCaller(createContext(user));
     await expect(caller.referrals.verifyUpi({ upiId: "not-an-upi" })).rejects.toThrow("Enter a valid UPI ID");
   });
+
+  it("blocks regular users from the admin withdrawal queue", async () => {
+    const caller = appRouter.createCaller(createContext(user));
+    await expect(caller.admin.withdrawals()).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
 });

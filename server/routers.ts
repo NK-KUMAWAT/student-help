@@ -2,8 +2,9 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { createResume, createUpiVerification, createWithdrawalRequest, getLatestResume, getLatestUpiVerification, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills } from "./db";
+import { createResume, createUpiVerification, createWithdrawalRequest, getAllWithdrawalRequests, getLatestResume, getLatestUpiVerification, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills, updateWithdrawalRequestStatus } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -53,6 +54,11 @@ const reviewedSkillsSchema = {
   required: ["skills", "summary", "reviewNotes"],
   additionalProperties: false,
 };
+
+const adminProcedure = protectedProcedure.use(({ ctx, next }) => {
+  if (ctx.user.role !== "admin") throw new TRPCError({ code: "FORBIDDEN", message: "Admin access required" });
+  return next();
+});
 
 export const appRouter = router({
   system: systemRouter,
@@ -141,6 +147,16 @@ export const appRouter = router({
         if (!verification || verification.id !== input.upiVerificationId || verification.status !== "verified") throw new Error("Verify your UPI ID before requesting a withdrawal");
         await createWithdrawalRequest(ctx.user.id, input.amount, input.payoutMethod, input.upiVerificationId);
         return { success: true as const, status: "requested" as const };
+      }),
+  }),
+  admin: router({
+    withdrawals: adminProcedure.query(() => getAllWithdrawalRequests()),
+    updateWithdrawal: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), status: z.enum(["processing", "paid", "rejected"]) }))
+      .mutation(async ({ input }) => {
+        const updated = await updateWithdrawalRequestStatus(input.id, input.status);
+        if (!updated) throw new Error("Could not update withdrawal request");
+        return { success: true as const, status: input.status };
       }),
   }),
 });

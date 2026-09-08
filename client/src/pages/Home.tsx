@@ -37,7 +37,7 @@ import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-type NavKey = "overview" | "profile" | "roadmap" | "matches" | "practice" | "refer";
+type NavKey = "overview" | "profile" | "roadmap" | "matches" | "practice" | "refer" | "admin";
 
 type Skill = {
   name: string;
@@ -61,13 +61,14 @@ type ExtractedResume = {
   skills: { name: string; level: number; evidence: string }[];
 };
 
-const navItems: { key: NavKey; label: string; icon: LucideIcon }[] = [
+const navItems: { key: NavKey; label: string; icon: LucideIcon; adminOnly?: boolean }[] = [
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "profile", label: "My profile", icon: UserRound },
   { key: "roadmap", label: "Skill roadmap", icon: Target },
   { key: "matches", label: "Job matches", icon: BriefcaseBusiness },
   { key: "practice", label: "Practice room", icon: Code2 },
   { key: "refer", label: "Refer & Earn", icon: UsersRound },
+  { key: "admin", label: "Admin withdrawals", icon: ShieldCheck, adminOnly: true },
 ];
 
 const initialSkills: Skill[] = [
@@ -249,7 +250,7 @@ export default function Home() {
 
         <div className="sidebar-label">Workspace</div>
         <nav className="sidebar-nav" aria-label="Primary navigation">
-          {navItems.map(({ key, label, icon: Icon }) => (
+          {navItems.filter((item) => !item.adminOnly || user?.role === "admin").map(({ key, label, icon: Icon }) => (
             <button key={key} className={`nav-item ${activeView === key ? "is-active" : ""}`} onClick={() => changeView(key)}>
               <Icon size={17} />
               <span>{label}</span>
@@ -381,6 +382,7 @@ export default function Home() {
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
           {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
           {activeView === "refer" ? <ReferralView onBack={() => changeView("overview")} /> : null}
+          {activeView === "admin" && user?.role === "admin" ? <AdminWithdrawalsView onBack={() => changeView("overview")} /> : null}
         </div>
       </main>
     </div>
@@ -410,6 +412,20 @@ function LegacyReferralView({ onBack }: { onBack: () => void }) {
     window.setTimeout(() => setCopied(false), 2200);
   };
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder and earn rewards when they complete their first career sprint.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy link"}</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> 3 friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹300</strong><small>Available to redeem</small></div><div className="referral-stat"><span>Successful referrals</span><strong>3</strong><small>2 this month</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹100</strong><small>1 friend in progress</small></div></div><div className="referral-grid"><section className="panel referral-steps"><SectionHeading eyebrow="HOW IT WORKS" title="Three steps, one good nudge" /><div className="referral-step"><span>01</span><div><strong>Share your invite</strong><p>Send your personal link to a classmate or friend.</p></div></div><div className="referral-step"><span>02</span><div><strong>They start their sprint</strong><p>Your friend joins and completes their first roadmap sprint.</p></div></div><div className="referral-step"><span>03</span><div><strong>You get rewarded</strong><p>₹100 credit lands in your rewards wallet.</p></div></div></section><section className="panel referral-activity"><SectionHeading eyebrow="RECENT ACTIVITY" title="Your referral circle" action="View wallet" /><div className="referral-person"><div className="avatar avatar--small">RK</div><div><strong>Riya Kapoor</strong><span>Completed first sprint</span></div><b>+₹100</b></div><div className="referral-person"><div className="avatar avatar--small avatar--blue">AS</div><div><strong>Arjun Singh</strong><span>Started a roadmap</span></div><em>Pending</em></div><div className="referral-person"><div className="avatar avatar--small avatar--pink">PM</div><div><strong>Priya Mehta</strong><span>Completed first sprint</span></div><b>+₹100</b></div></section></div></div>;
+}
+
+function AdminWithdrawalsView({ onBack }: { onBack: () => void }) {
+  const utils = trpc.useUtils();
+  const { data: requests, isLoading, error } = trpc.admin.withdrawals.useQuery();
+  const reviewMutation = trpc.admin.updateWithdrawal.useMutation({
+    onSuccess: async (result) => { await utils.admin.withdrawals.invalidate(); toast.success(`Request marked ${result.status}.`); },
+    onError: (reviewError) => toast.error(reviewError.message || "Could not update withdrawal."),
+  });
+  const rows = requests || [];
+  const pendingCount = rows.filter((request) => request.status === "requested" || request.status === "processing").length;
+  const totalPending = rows.filter((request) => request.status === "requested" || request.status === "processing").reduce((sum, request) => sum + request.amount, 0);
+  const formatDate = (value: Date | string | number) => new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return <div className="subpage admin-page"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><ShieldCheck size={14} /> ADMIN CONSOLE</p><h1>Withdrawal approvals.</h1><p>Review verified UPI requests before rewards leave the Pathfinder wallet.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-metrics"><div className="admin-metric"><span>Needs review</span><strong>{pendingCount}</strong><small>requests in queue</small></div><div className="admin-metric"><span>Pending value</span><strong>₹{totalPending}</strong><small>requested or processing</small></div><div className="admin-metric"><span>Verified payouts</span><strong>{rows.filter((request) => request.status === "paid").length}</strong><small>completed withdrawals</small></div></div><section className="panel admin-withdrawal-panel"><div className="admin-panel-heading"><div><p className="eyebrow">WITHDRAWAL QUEUE</p><h2>Review all requests</h2></div><span className="admin-refresh-label">UPI verification required</span></div>{isLoading ? <div className="admin-empty"><Sparkles size={18} className="spin-slow" /><p>Loading withdrawal requests…</p></div> : error ? <div className="admin-empty"><ShieldCheck size={18} /><p>{error.message}</p></div> : rows.length === 0 ? <div className="admin-empty"><Wallet size={20} /><strong>No withdrawal requests yet</strong><p>New requests will appear here after a student verifies their UPI ID.</p></div> : <div className="admin-request-list">{rows.map((request) => <div className="admin-request-row" key={request.id}><div className="admin-request-user"><div className="avatar avatar--small">{(request.userName || "U").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{request.userName || "Unnamed student"}</strong><span>{request.userEmail || "No email provided"}</span></div></div><div className="admin-request-detail"><span>AMOUNT</span><strong>₹{request.amount}</strong></div><div className="admin-request-detail"><span>VERIFIED UPI</span><strong>{request.upiId || request.payoutMethod}</strong></div><div className="admin-request-detail"><span>REQUESTED</span><strong>{formatDate(request.createdAt)}</strong></div><span className={`admin-status admin-status--${request.status}`}>{request.status}</span><div className="admin-request-actions">{request.status === "requested" ? <button className="admin-action admin-action--approve" disabled={reviewMutation.isPending} onClick={() => reviewMutation.mutate({ id: request.id, status: "processing" })}><Check size={13} /> Approve</button> : null}{request.status === "processing" ? <button className="admin-action admin-action--approve" disabled={reviewMutation.isPending} onClick={() => reviewMutation.mutate({ id: request.id, status: "paid" })}><Check size={13} /> Mark paid</button> : null}{request.status === "requested" || request.status === "processing" ? <button className="admin-action admin-action--reject" disabled={reviewMutation.isPending} onClick={() => reviewMutation.mutate({ id: request.id, status: "rejected" })}><X size={13} /> Reject</button> : null}</div></div>)}</div>}</section></div>;
 }
 
 function ReferralView({ onBack }: { onBack: () => void }) {

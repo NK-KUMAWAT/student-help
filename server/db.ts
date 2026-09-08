@@ -129,3 +129,29 @@ export async function createWithdrawalRequest(userId: number, amount: number, pa
   if (!db) return undefined;
   return db.insert(withdrawalRequests).values({ userId, amount, payoutMethod, upiVerificationId, status: "requested" });
 }
+
+export async function getAllWithdrawalRequests() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: withdrawalRequests.id,
+    userId: withdrawalRequests.userId,
+    userName: users.name,
+    userEmail: users.email,
+    amount: withdrawalRequests.amount,
+    payoutMethod: withdrawalRequests.payoutMethod,
+    status: withdrawalRequests.status,
+    createdAt: withdrawalRequests.createdAt,
+    upiId: upiVerifications.upiId,
+  }).from(withdrawalRequests)
+    .innerJoin(users, eq(users.id, withdrawalRequests.userId))
+    .leftJoin(upiVerifications, eq(upiVerifications.id, withdrawalRequests.upiVerificationId))
+    .orderBy(desc(withdrawalRequests.createdAt));
+}
+
+export async function updateWithdrawalRequestStatus(id: number, status: "processing" | "paid" | "rejected") {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db.update(withdrawalRequests).set({ status }).where(eq(withdrawalRequests.id, id));
+  return Boolean(result);
+}
