@@ -9,6 +9,8 @@ import {
   Check,
   ChevronRight,
   CircleHelp,
+  Clock3,
+  Copy,
   Code2,
   FileText,
   Flame,
@@ -27,10 +29,10 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-type NavKey = "overview" | "profile" | "roadmap" | "matches" | "practice";
+type NavKey = "overview" | "profile" | "roadmap" | "matches" | "practice" | "refer";
 
 type Skill = {
   name: string;
@@ -60,6 +62,7 @@ const navItems: { key: NavKey; label: string; icon: LucideIcon }[] = [
   { key: "roadmap", label: "Skill roadmap", icon: Target },
   { key: "matches", label: "Job matches", icon: BriefcaseBusiness },
   { key: "practice", label: "Practice room", icon: Code2 },
+  { key: "refer", label: "Refer & Earn", icon: UsersRound },
 ];
 
 const initialSkills: Skill[] = [
@@ -151,8 +154,13 @@ export default function Home() {
   const [completedMoves, setCompletedMoves] = useState<number[]>([2]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
+  const [now, setNow] = useState(() => new Date());
   const [extractedResume, setExtractedResume] = useState<ExtractedResume | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const extractResumeMutation = trpc.resume.extractSkills.useMutation({
     onSuccess: (result) => {
       const extracted = result as ExtractedResume;
@@ -278,6 +286,7 @@ export default function Home() {
           <div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14} /><strong>{navItems.find((item) => item.key === activeView)?.label}</strong></div>
           <div className="topbar-actions">
             <span className="demo-pill"><span /> Demo workspace</span>
+            <span className="live-clock"><Clock3 size={14} /> {now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} · {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
             <button className="icon-button" onClick={() => toast.info("You're all caught up.")} aria-label="Notifications"><Bell size={18} /><i /></button>
             <button className="top-avatar" onClick={() => changeView("profile")} aria-label="Open profile">{displayName.charAt(0).toUpperCase()}</button>
           </div>
@@ -366,6 +375,7 @@ export default function Home() {
           {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} /> : null}
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
           {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
+          {activeView === "refer" ? <ReferralView onBack={() => changeView("overview")} /> : null}
         </div>
       </main>
     </div>
@@ -382,6 +392,19 @@ function ProfileView({ displayName, email, skills, extraction, isExtracting, isS
 function EditableExtraction({ extraction, isSaving, onSave }: { extraction: ExtractedResume; isSaving: boolean; onSave: (next: ExtractedResume) => void }) {
   const [draft, setDraft] = useState(extraction);
   return <div className="edit-review-box"><div className="edit-review-heading"><span className="eyebrow eyebrow--green"><Sparkles size={13} /> SECOND AI REVIEW</span><span>Review and edit before saving</span></div>{draft.skills.map((skill, index) => <div className="edit-skill-row" key={`${skill.name}-${index}`}><input value={skill.name} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) })} /><input type="number" min="1" max="100" value={skill.level} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, level: Number(event.target.value) } : item) })} /><button className="remove-skill" onClick={() => setDraft({ ...draft, skills: draft.skills.filter((_, itemIndex) => itemIndex !== index) })}><X size={13} /></button></div>)}<button className="text-button" onClick={() => setDraft({ ...draft, skills: [...draft.skills, { name: "New skill", level: 50, evidence: "Added by student" }] })}><Plus size={13} /> Add skill</button><button className="dark-button dark-button--small save-review-button" disabled={isSaving} onClick={() => onSave(draft)}>{isSaving ? "Saving…" : "Save reviewed skills"} <Check size={14} /></button></div>;
+}
+
+function ReferralView({ onBack }: { onBack: () => void }) {
+  const referralCode = "AARAV-PATH26";
+  const [copied, setCopied] = useState(false);
+  const inviteLink = `https://pathfinder.app/join/${referralCode}`;
+  const copyLink = async () => {
+    await navigator.clipboard?.writeText(inviteLink);
+    setCopied(true);
+    toast.success("Referral link copied.");
+    window.setTimeout(() => setCopied(false), 2200);
+  };
+  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder and earn rewards when they complete their first career sprint.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy link"}</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> 3 friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹300</strong><small>Available to redeem</small></div><div className="referral-stat"><span>Successful referrals</span><strong>3</strong><small>2 this month</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹100</strong><small>1 friend in progress</small></div></div><div className="referral-grid"><section className="panel referral-steps"><SectionHeading eyebrow="HOW IT WORKS" title="Three steps, one good nudge" /><div className="referral-step"><span>01</span><div><strong>Share your invite</strong><p>Send your personal link to a classmate or friend.</p></div></div><div className="referral-step"><span>02</span><div><strong>They start their sprint</strong><p>Your friend joins and completes their first roadmap sprint.</p></div></div><div className="referral-step"><span>03</span><div><strong>You get rewarded</strong><p>₹100 credit lands in your rewards wallet.</p></div></div></section><section className="panel referral-activity"><SectionHeading eyebrow="RECENT ACTIVITY" title="Your referral circle" action="View wallet" /><div className="referral-person"><div className="avatar avatar--small">RK</div><div><strong>Riya Kapoor</strong><span>Completed first sprint</span></div><b>+₹100</b></div><div className="referral-person"><div className="avatar avatar--small avatar--blue">AS</div><div><strong>Arjun Singh</strong><span>Started a roadmap</span></div><em>Pending</em></div><div className="referral-person"><div className="avatar avatar--small avatar--pink">PM</div><div><strong>Priya Mehta</strong><span>Completed first sprint</span></div><b>+₹100</b></div></section></div></div>;
 }
 
 function RoadmapView({ completedMoves, onToggle, onBack }: { completedMoves: number[]; onToggle: (id: number) => void; onBack: () => void }) {
