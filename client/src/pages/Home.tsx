@@ -166,7 +166,7 @@ export default function Home() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<Message[]>([
-    { role: "assistant", content: "Hi! I’m Pathfinder Guide. Ask me about your roadmap, resume, job matches, or referrals." },
+    { role: "assistant", content: "Hi! I’m your friend. How can I help you?" },
   ]);
   const [notifications, setNotifications] = useState([
     { id: 1, title: "New role match", body: "Your profile is a strong match for React Developer at Northstar AI.", time: "12 min ago", read: false },
