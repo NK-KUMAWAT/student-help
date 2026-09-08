@@ -22,7 +22,28 @@ export const resumes = mysqlTable("resumes", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const referralRewards = mysqlTable("referralRewards", {
+  id: int("id").autoincrement().primaryKey(),
+  referrerUserId: int("referrerUserId").notNull(),
+  referredName: varchar("referredName", { length: 160 }).notNull(),
+  event: varchar("event", { length: 120 }).notNull(),
+  amount: int("amount").notNull(),
+  status: mysqlEnum("status", ["pending", "credited", "reversed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const withdrawalRequests = mysqlTable("withdrawalRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  amount: int("amount").notNull(),
+  payoutMethod: varchar("payoutMethod", { length: 80 }).notNull(),
+  status: mysqlEnum("status", ["requested", "processing", "paid", "rejected"]).default("requested").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Resume = typeof resumes.$inferSelect;
 export type InsertResume = typeof resumes.$inferInsert;
+export type ReferralReward = typeof referralRewards.$inferSelect;
+export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;

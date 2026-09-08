@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
-import { createResume, getLatestResume, updateResumeSkills } from "./db";
+import { createResume, createWithdrawalRequest, getLatestResume, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -113,6 +113,23 @@ export const appRouter = router({
         const saved = await updateResumeSkills(input.resumeId, ctx.user.id, JSON.stringify({ skills: input.skills, summary: input.summary, reviewNotes: input.reviewNotes }));
         if (!saved) throw new Error("Could not save resume edits");
         return { success: true as const };
+      }),
+  }),
+  referrals: router({
+    dashboard: protectedProcedure.query(async ({ ctx }) => {
+      const [rewards, withdrawals, leaderboard] = await Promise.all([
+        getReferralRewards(ctx.user.id),
+        getWithdrawalRequests(ctx.user.id),
+        getReferralLeaderboard(),
+      ]);
+      return { rewards, withdrawals, leaderboard };
+    }),
+    requestWithdrawal: protectedProcedure
+      .input(z.object({ amount: z.number().int().positive(), payoutMethod: z.string().min(3).max(80) }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.amount < 100) throw new Error("Minimum withdrawal is ₹100");
+        await createWithdrawalRequest(ctx.user.id, input.amount, input.payoutMethod);
+        return { success: true as const, status: "requested" as const };
       }),
   }),
 });

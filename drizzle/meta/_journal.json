@@ -15,6 +15,13 @@
       "when": 1788352732087,
       "tag": "0001_illegal_darwin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1788862870933,
+      "tag": "0002_last_eternals",
+      "breakpoints": true
     }
   ]
 }

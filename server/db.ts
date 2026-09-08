@@ -1,6 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertResume, InsertUser, resumes, users } from "../drizzle/schema";
+import { InsertResume, InsertUser, referralRewards, resumes, users, withdrawalRequests } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -83,4 +83,32 @@ export async function updateResumeSkills(id: number, userId: number, extractedSk
     .set({ extractedSkills })
     .where(and(eq(resumes.id, id), eq(resumes.userId, userId)));
   return Boolean(result);
+}
+
+export async function getReferralRewards(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(referralRewards).where(eq(referralRewards.referrerUserId, userId)).orderBy(desc(referralRewards.createdAt));
+}
+
+export async function getWithdrawalRequests(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(withdrawalRequests).where(eq(withdrawalRequests.userId, userId)).orderBy(desc(withdrawalRequests.createdAt));
+}
+
+export async function getReferralLeaderboard() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    userId: referralRewards.referrerUserId,
+    successfulReferrals: sql<number>`count(*)`,
+    totalEarned: sql<number>`coalesce(sum(${referralRewards.amount}), 0)`,
+  }).from(referralRewards).where(eq(referralRewards.status, "credited")).groupBy(referralRewards.referrerUserId).orderBy(sql`sum(${referralRewards.amount}) desc`).limit(10);
+}
+
+export async function createWithdrawalRequest(userId: number, amount: number, payoutMethod: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.insert(withdrawalRequests).values({ userId, amount, payoutMethod, status: "requested" });
 }
