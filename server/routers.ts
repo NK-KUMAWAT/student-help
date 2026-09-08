@@ -3,7 +3,7 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { z } from "zod";
-import { createResume, createWithdrawalRequest, getLatestResume, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills } from "./db";
+import { createResume, createUpiVerification, createWithdrawalRequest, getLatestResume, getLatestUpiVerification, getReferralLeaderboard, getReferralRewards, getWithdrawalRequests, updateResumeSkills } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 
@@ -117,18 +117,29 @@ export const appRouter = router({
   }),
   referrals: router({
     dashboard: protectedProcedure.query(async ({ ctx }) => {
-      const [rewards, withdrawals, leaderboard] = await Promise.all([
+      const [rewards, withdrawals, leaderboard, upiVerification] = await Promise.all([
         getReferralRewards(ctx.user.id),
         getWithdrawalRequests(ctx.user.id),
         getReferralLeaderboard(),
+        getLatestUpiVerification(ctx.user.id),
       ]);
-      return { rewards, withdrawals, leaderboard };
+      return { rewards, withdrawals, leaderboard, upiVerification, monthLabel: new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(new Date()) };
     }),
+    verifyUpi: protectedProcedure
+      .input(z.object({ upiId: z.string().trim().min(3).max(255) }))
+      .mutation(async ({ input, ctx }) => {
+        const upiId = input.upiId.toLowerCase();
+        if (!/^[a-z0-9._-]{2,256}@[a-z]{2,64}$/.test(upiId)) throw new Error("Enter a valid UPI ID, for example name@bank");
+        await createUpiVerification(ctx.user.id, upiId, "verified");
+        return { verified: true as const, upiId };
+      }),
     requestWithdrawal: protectedProcedure
-      .input(z.object({ amount: z.number().int().positive(), payoutMethod: z.string().min(3).max(80) }))
+      .input(z.object({ amount: z.number().int().positive(), payoutMethod: z.string().min(3).max(80), upiVerificationId: z.number().int().positive() }))
       .mutation(async ({ input, ctx }) => {
         if (input.amount < 100) throw new Error("Minimum withdrawal is ₹100");
-        await createWithdrawalRequest(ctx.user.id, input.amount, input.payoutMethod);
+        const verification = await getLatestUpiVerification(ctx.user.id);
+        if (!verification || verification.id !== input.upiVerificationId || verification.status !== "verified") throw new Error("Verify your UPI ID before requesting a withdrawal");
+        await createWithdrawalRequest(ctx.user.id, input.amount, input.payoutMethod, input.upiVerificationId);
         return { success: true as const, status: "requested" as const };
       }),
   }),

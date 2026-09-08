@@ -1,6 +1,6 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertResume, InsertUser, referralRewards, resumes, users, withdrawalRequests } from "../drizzle/schema";
+import { InsertResume, InsertUser, referralRewards, resumes, users, upiVerifications, withdrawalRequests } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -100,15 +100,32 @@ export async function getWithdrawalRequests(userId: number) {
 export async function getReferralLeaderboard() {
   const db = await getDb();
   if (!db) return [];
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
   return db.select({
     userId: referralRewards.referrerUserId,
+    name: users.name,
     successfulReferrals: sql<number>`count(*)`,
     totalEarned: sql<number>`coalesce(sum(${referralRewards.amount}), 0)`,
-  }).from(referralRewards).where(eq(referralRewards.status, "credited")).groupBy(referralRewards.referrerUserId).orderBy(sql`sum(${referralRewards.amount}) desc`).limit(10);
+  }).from(referralRewards).innerJoin(users, eq(users.id, referralRewards.referrerUserId)).where(and(eq(referralRewards.status, "credited"), gt(referralRewards.createdAt, monthStart))).groupBy(referralRewards.referrerUserId, users.name).orderBy(sql`sum(${referralRewards.amount}) desc`).limit(10);
 }
 
-export async function createWithdrawalRequest(userId: number, amount: number, payoutMethod: string) {
+export async function getLatestUpiVerification(userId: number) {
   const db = await getDb();
   if (!db) return undefined;
-  return db.insert(withdrawalRequests).values({ userId, amount, payoutMethod, status: "requested" });
+  const result = await db.select().from(upiVerifications).where(eq(upiVerifications.userId, userId)).orderBy(desc(upiVerifications.createdAt)).limit(1);
+  return result[0];
+}
+
+export async function createUpiVerification(userId: number, upiId: string, status: "verified" | "rejected") {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.insert(upiVerifications).values({ userId, upiId, status, verifiedAt: status === "verified" ? new Date() : null });
+}
+
+export async function createWithdrawalRequest(userId: number, amount: number, payoutMethod: string, upiVerificationId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  return db.insert(withdrawalRequests).values({ userId, amount, payoutMethod, upiVerificationId, status: "requested" });
 }

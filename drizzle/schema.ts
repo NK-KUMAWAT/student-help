@@ -32,11 +32,21 @@ export const referralRewards = mysqlTable("referralRewards", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const upiVerifications = mysqlTable("upiVerifications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  upiId: varchar("upiId", { length: 255 }).notNull(),
+  status: mysqlEnum("status", ["verified", "rejected"]).default("rejected").notNull(),
+  verifiedAt: timestamp("verifiedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const withdrawalRequests = mysqlTable("withdrawalRequests", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   amount: int("amount").notNull(),
   payoutMethod: varchar("payoutMethod", { length: 80 }).notNull(),
+  upiVerificationId: int("upiVerificationId"),
   status: mysqlEnum("status", ["requested", "processing", "paid", "rejected"]).default("requested").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -47,3 +57,4 @@ export type Resume = typeof resumes.$inferSelect;
 export type InsertResume = typeof resumes.$inferInsert;
 export type ReferralReward = typeof referralRewards.$inferSelect;
 export type WithdrawalRequest = typeof withdrawalRequests.$inferSelect;
+export type UpiVerification = typeof upiVerifications.$inferSelect;

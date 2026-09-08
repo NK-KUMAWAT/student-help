@@ -1,0 +1,1 @@
+ALTER TABLE `referralRewards` DROP COLUMN `rewardMonth`;

@@ -32,6 +32,11 @@ describe("referrals", () => {
 
   it("rejects withdrawal requests below the minimum amount", async () => {
     const caller = appRouter.createCaller(createContext(user));
-    await expect(caller.referrals.requestWithdrawal({ amount: 50, payoutMethod: "UPI" })).rejects.toThrow("Minimum withdrawal is ₹100");
+    await expect(caller.referrals.requestWithdrawal({ amount: 50, payoutMethod: "UPI", upiVerificationId: 1 })).rejects.toThrow("Minimum withdrawal is ₹100");
+  });
+
+  it("rejects malformed UPI IDs before verification", async () => {
+    const caller = appRouter.createCaller(createContext(user));
+    await expect(caller.referrals.verifyUpi({ upiId: "not-an-upi" })).rejects.toThrow("Enter a valid UPI ID");
   });
 });

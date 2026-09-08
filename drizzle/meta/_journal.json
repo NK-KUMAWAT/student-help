@@ -22,6 +22,20 @@
       "when": 1788862870933,
       "tag": "0002_last_eternals",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1788865517620,
+      "tag": "0003_nappy_gwen_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1788865545744,
+      "tag": "0004_bright_stranger",
+      "breakpoints": true
     }
   ]
 }
