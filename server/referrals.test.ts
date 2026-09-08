@@ -44,4 +44,9 @@ describe("referrals", () => {
     const caller = appRouter.createCaller(createContext(user));
     await expect(caller.admin.withdrawals()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
+
+  it("requires authentication for the Help Center assistant", async () => {
+    const caller = appRouter.createCaller(createContext(null));
+    await expect(caller.support.chat({ messages: [{ role: "user", content: "How do I improve my profile?" }] })).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
 });

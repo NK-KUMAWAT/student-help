@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { AIChatBox, type Message } from "@/components/AIChatBox";
 import {
   ArrowUpRight,
   BarChart3,
@@ -17,6 +18,7 @@ import {
   Gauge,
   GraduationCap,
   LayoutDashboard,
+  LifeBuoy,
   Mail,
   MessageCircle,
   Menu,
@@ -162,6 +164,10 @@ export default function Home() {
   const [jobSearch, setJobSearch] = useState("");
   const [now, setNow] = useState(() => new Date());
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<Message[]>([
+    { role: "assistant", content: "Hi! I’m Pathfinder Guide. Ask me about your roadmap, resume, job matches, or referrals." },
+  ]);
   const [notifications, setNotifications] = useState([
     { id: 1, title: "New role match", body: "Your profile is a strong match for React Developer at Northstar AI.", time: "12 min ago", read: false },
     { id: 2, title: "Roadmap sprint ready", body: "Your next DSA practice sprint is ready to start.", time: "1 hr ago", read: false },
@@ -185,6 +191,10 @@ export default function Home() {
   const saveResumeMutation = trpc.resume.saveEdits.useMutation({
     onSuccess: () => toast.success("Your edited skills were saved."),
     onError: (error) => toast.error(error.message || "Could not save skill edits."),
+  });
+  const supportChatMutation = trpc.support.chat.useMutation({
+    onSuccess: (response) => setChatMessages((current) => [...current, { role: "assistant", content: response.content }]),
+    onError: (error) => toast.error(error.message || "The Help Center assistant is unavailable right now."),
   });
 
   const displayName = user?.name || "Aarav Mehta";
@@ -211,6 +221,12 @@ export default function Home() {
 
   const toggleMove = (id: number) => {
     setCompletedMoves((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+  };
+
+  const sendHelpMessage = (content: string) => {
+    const nextMessages: Message[] = [...chatMessages, { role: "user", content }];
+    setChatMessages(nextMessages);
+    supportChatMutation.mutate({ messages: nextMessages.filter((message): message is Message & { role: "user" | "assistant" } => message.role !== "system").slice(-12) });
   };
 
   const handleResumeChange = async (file?: File) => {
@@ -248,8 +264,8 @@ export default function Home() {
         <div className="brand-lockup">
           <div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div>
           <div>
-            <span className="brand-name">pathfinder</span>
-            <span className="brand-caption">career OS for students</span>
+            <span className="brand-name">student care help</span>
+            <span className="brand-caption">support for every student</span>
           </div>
           <button className="mobile-close" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
@@ -276,9 +292,9 @@ export default function Home() {
         </div>
 
         <div className="sidebar-spacer" />
-        <button className="help-link" onClick={() => toast.info("Guidance centre will be connected in the next build.")}>
-          <CircleHelp size={16} />
-          <span>Guidance centre</span>
+        <button className={`help-link ${helpOpen ? "is-active" : ""}`} onClick={() => setHelpOpen(true)}>
+          <LifeBuoy size={16} />
+          <span>Help Center</span>
         </button>
         <div className="sidebar-profile">
           <div className="avatar avatar--small">{displayName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div>
@@ -392,6 +408,7 @@ export default function Home() {
           {activeView === "admin" && user?.role === "admin" ? <AdminWithdrawalsView onBack={() => changeView("overview")} /> : null}
         </div>
       </main>
+      {helpOpen ? <div className="help-drawer-backdrop" onClick={() => setHelpOpen(false)}><aside className="help-drawer" onClick={(event) => event.stopPropagation()}><div className="help-drawer__header"><div><p className="eyebrow eyebrow--green"><LifeBuoy size={14} /> HELP CENTER</p><strong>Pathfinder Guide</strong><small>Always here for your next step</small></div><button className="help-drawer__close" onClick={() => setHelpOpen(false)} aria-label="Close Help Center"><X size={17} /></button></div><AIChatBox messages={chatMessages} onSendMessage={sendHelpMessage} isLoading={supportChatMutation.isPending} height="430px" className="support-chat" placeholder="Ask about your Pathfinder workspace…" emptyStateMessage="What can I help you with?" suggestedPrompts={["How do I improve my profile?", "Explain my referral rewards", "What should I practice next?"]} /></aside></div> : null}
     </div>
   );
 }

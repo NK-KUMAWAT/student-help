@@ -121,6 +121,21 @@ export const appRouter = router({
         return { success: true as const };
       }),
   }),
+  support: router({
+    chat: protectedProcedure
+      .input(z.object({ messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(2000) })).max(12) }))
+      .mutation(async ({ input }) => {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are Pathfinder Guide, a concise and encouraging support assistant for a student career workspace. Help with resume skills, roadmap, job matches, practice, referrals, notifications, and withdrawal support. Do not invent account data or promise payments. If a user needs an admin action, explain where to find the relevant workspace section." },
+            ...input.messages,
+          ],
+          max_tokens: 500,
+        });
+        const content = response.choices[0]?.message.content;
+        return { content: typeof content === "string" ? content : content.map((part) => part.type === "text" ? part.text : "").join("") };
+      }),
+  }),
   referrals: router({
     dashboard: protectedProcedure.query(async ({ ctx }) => {
       const [rewards, withdrawals, leaderboard, upiVerification] = await Promise.all([
