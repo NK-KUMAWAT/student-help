@@ -229,6 +229,7 @@ export default function Home() {
 
   const displayName = user?.name || "Student";
   const firstName = displayName.split(" ")[0];
+  const timeGreeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   const profileCompletion = Math.min(100, 62 + (skills.length - initialSkills.length) * 6);
   const filteredJobs = useMemo(
     () => jobs.filter((job) => `${job.company} ${job.role} ${job.location}`.toLowerCase().includes(jobSearch.toLowerCase())),
@@ -385,7 +386,7 @@ export default function Home() {
               <section className="welcome-row">
                 <div>
                   <p className="eyebrow eyebrow--green"><span className="status-dot" /> SPRINT 06 · PLACEMENT SEASON</p>
-                  <h1>Good morning, {firstName}<span className="heading-dot">.</span></h1>
+                  <h1>{timeGreeting}, {firstName}<span className="heading-dot">.</span></h1>
                   <p className="welcome-copy">Your next opportunity is closer than your last commit. Here’s the clearest path forward today.</p>
                 </div>
                 <button className="primary-button" onClick={() => changeView("roadmap")}><Sparkles size={16} /> Continue roadmap <ArrowUpRight size={16} /></button>
