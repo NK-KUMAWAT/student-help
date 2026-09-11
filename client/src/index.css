@@ -294,3 +294,9 @@ h1 { margin-bottom: 11px; color: #192a2e; font-size: clamp(31px, 3.3vw, 45px); l
 @media (max-width: 760px) { .auth-screen { padding: 16px; place-items: start center; }.auth-card { margin-top: 5vh; border-radius: 18px; }.auth-card__brand { padding: 20px 21px; }.auth-card__content { padding: 42px 24px 38px; }.auth-card__content h1 { font-size: clamp(39px, 13vw, 58px); }.auth-card__copy { font-size: 12px; }.auth-actions { align-items: flex-start; flex-direction: column; gap: 12px; }.auth-button, .auth-secondary { width: 100%; }.auth-secondary { justify-content: flex-start; padding-left: 1px; }.auth-card__footer { gap: 12px; padding: 15px 21px; }.auth-orbit--one { right: -270px; }.auth-orbit--two { right: -150px; } }
 .profile-fields { grid-template-columns: 1.05fr 1.35fr 1.35fr .68fr; }
 @media (max-width: 760px) { .profile-fields { grid-template-columns: 1fr; } }
+
+.daily-quote { display: flex; align-items: flex-start; gap: 8px; max-width: 610px; margin-top: 16px; padding: 10px 12px; border-left: 2px solid #79b995; border-radius: 0 8px 8px 0; background: rgba(229, 246, 235, .7); color: #4d7461; }
+.daily-quote svg { flex: 0 0 auto; margin-top: 1px; color: #4d9b76; }
+.daily-quote p { margin: 0; font-family: "DM Mono", monospace; font-size: 9px; line-height: 1.6; }
+.daily-quote p span { color: #86a294; }
+@media (max-width: 760px) { .daily-quote { max-width: 100%; margin-top: 13px; padding: 9px 10px; }.daily-quote p { font-size: 8px; } }

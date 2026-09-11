@@ -126,6 +126,21 @@ const suggestedSkills: Skill[] = [
   { name: "System design", level: 12, tone: "pink" },
 ];
 
+const dailyQuotes = [
+  { text: "Small progress is still progress. Keep showing up for your future self.", author: "Student Care Help" },
+  { text: "You do not need to have it all figured out. You only need to take the next useful step.", author: "Student Care Help" },
+  { text: "Your skills grow every time you choose practice over hesitation.", author: "Student Care Help" },
+  { text: "Confidence is built by keeping promises to yourself, one focused session at a time.", author: "Student Care Help" },
+  { text: "The opportunity you want is often waiting behind the habit you have not built yet.", author: "Student Care Help" },
+  { text: "Let today be proof that your direction matters more than your speed.", author: "Student Care Help" },
+  { text: "You are closer than you think. Finish one meaningful thing today.", author: "Student Care Help" },
+];
+
+function getDailyQuote(date: Date) {
+  const dayNumber = Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000);
+  return dailyQuotes[((dayNumber % dailyQuotes.length) + dailyQuotes.length) % dailyQuotes.length];
+}
+
 const readFileAsDataUrl = (file: File) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -230,6 +245,7 @@ export default function Home() {
   const displayName = user?.name || "Student";
   const firstName = displayName.split(" ")[0];
   const timeGreeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
+  const dailyQuote = getDailyQuote(now);
   const profileCompletion = Math.min(100, 62 + (skills.length - initialSkills.length) * 6);
   const filteredJobs = useMemo(
     () => jobs.filter((job) => `${job.company} ${job.role} ${job.location}`.toLowerCase().includes(jobSearch.toLowerCase())),
@@ -388,6 +404,7 @@ export default function Home() {
                   <p className="eyebrow eyebrow--green"><span className="status-dot" /> SPRINT 06 · PLACEMENT SEASON</p>
                   <h1>{timeGreeting}, {firstName}<span className="heading-dot">.</span></h1>
                   <p className="welcome-copy">Your next opportunity is closer than your last commit. Here’s the clearest path forward today.</p>
+                  <div className="daily-quote" aria-label="Daily motivational quote"><Sparkles size={15} /><p>“{dailyQuote.text}” <span>— {dailyQuote.author}</span></p></div>
                 </div>
                 <button className="primary-button" onClick={() => changeView("roadmap")}><Sparkles size={16} /> Continue roadmap <ArrowUpRight size={16} /></button>
               </section>
