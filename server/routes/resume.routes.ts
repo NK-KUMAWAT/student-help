@@ -85,7 +85,7 @@ router.post("/extract-skills", requireAuth, async (req: Request, res: Response) 
     const { key, url } = await storagePut(`resumes/${String(user._id)}/${fileName}`, fileBuffer, mimeType);
     const signedUrl = await storageGetSignedUrl(key);
 
-    let reviewed: { skills: { name: string; level: number; evidence: string }[]; summary: string; reviewNotes: string };
+    let reviewed: { skills: { name: string; level: number; evidence: string }[]; summary: string; reviewNotes: string; rawText?: string; education?: { institution: string; degree: string; year: string; score: string }[]; experience?: { company: string; role: string; duration: string; description: string }[]; projects?: { title: string; description: string; technologies: string }[]; certifications?: { name: string; issuer: string; date: string }[]; achievements?: string[]; languages?: { name: string; proficiency: string }[]; personalDetails?: { name: string; email: string; phone: string; location: string; links: string[] } };
 
     if (!hasLlmKey()) {
       // Fallback extraction — no API key required.
@@ -139,6 +139,13 @@ const saveEditsSchema = z.object({
   skills: z.array(z.object({ name: z.string().min(1).max(80), level: z.number().int().min(1).max(100), evidence: z.string().max(240) })).max(40),
   summary: z.string().max(1000),
   reviewNotes: z.string().max(1000),
+  education: z.array(z.object({ institution: z.string(), degree: z.string(), year: z.string(), score: z.string() })).optional(),
+  experience: z.array(z.object({ company: z.string(), role: z.string(), duration: z.string(), description: z.string() })).optional(),
+  projects: z.array(z.object({ title: z.string(), description: z.string(), technologies: z.string() })).optional(),
+  certifications: z.array(z.object({ name: z.string(), issuer: z.string(), date: z.string() })).optional(),
+  achievements: z.array(z.string()).optional(),
+  languages: z.array(z.object({ name: z.string(), proficiency: z.string() })).optional(),
+  personalDetails: z.object({ name: z.string(), email: z.string(), phone: z.string(), location: z.string(), links: z.array(z.string()) }).optional(),
 });
 
 router.put("/save-edits", requireAuth, async (req: Request, res: Response) => {
@@ -153,7 +160,8 @@ router.put("/save-edits", requireAuth, async (req: Request, res: Response) => {
     res.status(404).json({ error: "Resume not found or no longer editable" });
     return;
   }
-  latest.extractedSkills = JSON.stringify({ skills: parsed.data.skills, summary: parsed.data.summary, reviewNotes: parsed.data.reviewNotes });
+  const { resumeId, ...saveData } = parsed.data;
+  latest.extractedSkills = JSON.stringify(saveData);
   await latest.save();
   res.json({ success: true });
 });
@@ -173,6 +181,14 @@ router.get("/latest", requireAuth, async (req: Request, res: Response) => {
       skills: parsed.skills ?? [],
       summary: parsed.summary ?? "",
       reviewNotes: parsed.reviewNotes ?? "",
+      rawText: parsed.rawText ?? "",
+      education: parsed.education ?? [],
+      experience: parsed.experience ?? [],
+      projects: parsed.projects ?? [],
+      certifications: parsed.certifications ?? [],
+      achievements: parsed.achievements ?? [],
+      languages: parsed.languages ?? [],
+      personalDetails: parsed.personalDetails ?? { name: "", email: "", phone: "", location: "", links: [] },
     });
   } catch {
     res.json(null);

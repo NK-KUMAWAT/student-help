@@ -57,19 +57,34 @@ export const profileApi = {
 // Resume
 // -----------------------------------------------------------------------------
 
+export type EducationEntry = { institution: string; degree: string; year: string; score: string };
+export type ExperienceEntry = { company: string; role: string; duration: string; description: string };
+export type ProjectEntry = { title: string; description: string; technologies: string };
+export type CertificationEntry = { name: string; issuer: string; date: string };
+export type LanguageEntry = { name: string; proficiency: string };
+export type PersonalDetails = { name: string; email: string; phone: string; location: string; links: string[] };
+
 export type ExtractedResume = {
   fileName: string;
-  url: string;
+  url?: string;
   resumeId: string;
   skills: { name: string; level: number; evidence: string }[];
   summary: string;
   reviewNotes: string;
+  rawText?: string;
+  education: EducationEntry[];
+  experience: ExperienceEntry[];
+  projects: ProjectEntry[];
+  certifications: CertificationEntry[];
+  achievements: string[];
+  languages: LanguageEntry[];
+  personalDetails: PersonalDetails;
 };
 
 export const resumeApi = {
   extractSkills: (body: { fileName: string; mimeType: string; fileBase64: string }) =>
     api.post<ExtractedResume>("/api/resume/extract-skills", body).then(r => r.data),
-  saveEdits: (body: { resumeId: string; skills: { name: string; level: number; evidence: string }[]; summary: string; reviewNotes: string }) =>
+  saveEdits: (body: Partial<ExtractedResume> & { resumeId: string }) =>
     api.put<{ success: boolean }>("/api/resume/save-edits", body).then(r => r.data),
   latest: () => api.get<ExtractedResume | null>("/api/resume/latest").then(r => r.data),
 };

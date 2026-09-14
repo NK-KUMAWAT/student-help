@@ -1,4 +1,5 @@
 import { ENV } from "./env";
+import { PDFParse } from "pdf-parse";
 
 export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
@@ -301,11 +302,7 @@ const SKILL_DATABASE: { name: string; aliases: string[]; category: string }[] = 
 
 function extractTextFromPdf(buffer: Buffer): string {
   try {
-    // pdf-parse is CommonJS
-    const pdfParse = require("pdf-parse");
-    // pdf-parse is synchronous-ish but returns a promise; we handle both.
-    // We'll use a sync fallback: extract readable ASCII text from the buffer.
-    // This is a simple heuristic that works for many text-based PDFs.
+    // Simple heuristic fallback: extract readable ASCII text from the buffer.
     const text = buffer.toString("latin1");
     // Extract text between parentheses in PDF content streams (Tj/TJ operators)
     const matches = text.match(/\(([^()]{2,})\)/g) || [];
@@ -321,9 +318,11 @@ function extractTextFromPdf(buffer: Buffer): string {
 
 async function extractTextFromPdfAsync(buffer: Buffer): Promise<string> {
   try {
-    const pdfParse = require("pdf-parse");
-    const data = await pdfParse(buffer);
-    return data.text || "";
+    const uint8 = new Uint8Array(buffer);
+    const parser = new PDFParse(uint8);
+    const data = await parser.getText();
+    const text = typeof data === "string" ? data : (data.text || "");
+    return text || "";
   } catch {
     return extractTextFromPdf(buffer);
   }
@@ -384,7 +383,220 @@ export type FallbackResumeResult = {
   skills: { name: string; level: number; evidence: string }[];
   summary: string;
   reviewNotes: string;
+  rawText: string;
+  education: { institution: string; degree: string; year: string; score: string }[];
+  experience: { company: string; role: string; duration: string; description: string }[];
+  projects: { title: string; description: string; technologies: string }[];
+  certifications: { name: string; issuer: string; date: string }[];
+  achievements: string[];
+  languages: { name: string; proficiency: string }[];
+  personalDetails: { name: string; email: string; phone: string; location: string; links: string[] };
 };
+
+// Extract education entries from resume text
+function extractEducation(text: string): { institution: string; degree: string; year: string; score: string }[] {
+  const education: { institution: string; degree: string; year: string; score: string }[] = [];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  // Look for education section
+  const eduStart = lines.findIndex(l => /education/i.test(l));
+  if (eduStart === -1) return education;
+
+  // Find the next section header after education
+  const nextSectionIdx = lines.findIndex((l, i) => i > eduStart && /^(experience|employment|work|internship|projects|skills|technical|certifications|achievements|training|languages|personal|declaration|summary|objective|contact)/i.test(l));
+  const eduLines = nextSectionIdx === -1 ? lines.slice(eduStart + 1) : lines.slice(eduStart + 1, nextSectionIdx);
+
+  // Parse education entries - look for patterns like "College Name, University" + "Degree Year" + "Score"
+  let current: { institution: string; degree: string; year: string; score: string } | null = null;
+  for (const line of eduLines) {
+    const yearMatch = line.match(/(19|20)\d{2}[-–]?(19|20)?\d{0,2}/);
+    const scoreMatch = line.match(/(\d{1,3}(\.\d+)?%|CGPA\s*:?\s*\d+(\.\d+)?)/i);
+    const degreeMatch = line.match(/(bachelor|master|b\.?tech|m\.?tech|b\.?a\b|m\.?a\b|b\.?sc|m\.?sc|b\.?com|diploma|class\s+(x|xiix|xi)|senior secondary|secondary|higher secondary)/i);
+
+    if (degreeMatch && !current) {
+      current = { institution: "", degree: line, year: yearMatch ? yearMatch[0] : "", score: scoreMatch ? scoreMatch[0] : "" };
+    } else if (current && !current.institution && !degreeMatch && !yearMatch && !scoreMatch) {
+      current.institution = line;
+    } else if (current && (yearMatch || scoreMatch) && !degreeMatch) {
+      if (yearMatch && !current.year) current.year = yearMatch[0];
+      if (scoreMatch && !current.score) current.score = scoreMatch[0];
+    } else if (!current && !yearMatch && !scoreMatch && !degreeMatch) {
+      // Could be institution name
+      current = { institution: line, degree: "", year: "", score: "" };
+    } else if (current && (current.institution || current.degree)) {
+      if (yearMatch && !current.year) current.year = yearMatch[0];
+      if (scoreMatch && !current.score) current.score = scoreMatch[0];
+      if (!degreeMatch && !yearMatch && !scoreMatch && !current.institution) current.institution = line;
+      else if (degreeMatch && !current.degree) current.degree = line;
+    }
+    // Push when we see a new degree or institution pattern
+    if (current && current.degree && current.institution && (yearMatch || scoreMatch)) {
+      education.push(current);
+      current = null;
+    }
+  }
+  // Push any remaining
+  if (current && (current.institution || current.degree)) {
+    education.push(current);
+  }
+
+  return education;
+}
+
+// Extract experience entries from resume text
+function extractExperience(text: string): { company: string; role: string; duration: string; description: string }[] {
+  const experience: { company: string; role: string; duration: string; description: string }[] = [];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const expStart = lines.findIndex(l => /^(experience|employment|work experience|internship)/i.test(l));
+  if (expStart === -1) return experience;
+
+  const nextSectionIdx = lines.findIndex((l, i) => i > expStart && /^(education|skills|technical|projects|certifications|achievements|training|languages|personal|declaration|summary|objective|contact)/i.test(l));
+  const expLines = nextSectionIdx === -1 ? lines.slice(expStart + 1) : lines.slice(expStart + 1, nextSectionIdx);
+
+  for (const line of expLines) {
+    // Check if it mentions "fresher" or "no experience"
+    if (/fresher|no experience|currently seeking/i.test(line)) {
+      experience.push({ company: "", role: "Fresher", duration: "", description: line });
+      continue;
+    }
+    // Try to parse company/role patterns
+    const durationMatch = line.match(/((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(19|20)\d{2}\s*[-–to]+\s*(present|current|(19|20)\d{2})?/i);
+    if (durationMatch) {
+      experience.push({ company: "", role: "", duration: durationMatch[0], description: line });
+    }
+  }
+
+  return experience;
+}
+
+// Extract projects from resume text
+function extractProjects(text: string): { title: string; description: string; technologies: string }[] {
+  const projects: { title: string; description: string; technologies: string }[] = [];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const projStart = lines.findIndex(l => /^projects?/i.test(l));
+  if (projStart === -1) return projects;
+
+  const nextSectionIdx = lines.findIndex((l, i) => i > projStart && /^(education|experience|skills|technical|certifications|achievements|training|languages|personal|declaration|summary|objective|contact|employment|work|internship)/i.test(l));
+  const projLines = nextSectionIdx === -1 ? lines.slice(projStart + 1) : lines.slice(projStart + 1, nextSectionIdx);
+
+  let current: { title: string; description: string; technologies: string } | null = null;
+  for (const line of projLines) {
+    // Project titles often start with a title-like pattern
+    if (!current) {
+      current = { title: line, description: "", technologies: "" };
+    } else {
+      current.description = current.description ? current.description + " " + line : line;
+    }
+  }
+  if (current && current.title) {
+    projects.push(current);
+  }
+
+  return projects;
+}
+
+// Extract certifications from resume text
+function extractCertifications(text: string): { name: string; issuer: string; date: string }[] {
+  const certifications: { name: string; issuer: string; date: string }[] = [];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const certStart = lines.findIndex(l => /^certifications?/i.test(l));
+  if (certStart === -1) return certifications;
+
+  const nextSectionIdx = lines.findIndex((l, i) => i > certStart && /^(education|experience|skills|technical|projects|achievements|training|languages|personal|declaration|summary|objective|contact|employment|work|internship)/i.test(l));
+  const certLines = nextSectionIdx === -1 ? lines.slice(certStart + 1) : lines.slice(certStart + 1, nextSectionIdx);
+
+  for (const line of certLines) {
+    if (line.length > 3) {
+      certifications.push({ name: line, issuer: "", date: "" });
+    }
+  }
+
+  return certifications;
+}
+
+// Extract achievements from resume text
+function extractAchievements(text: string): string[] {
+  const achievements: string[] = [];
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  const achStart = lines.findIndex(l => /^achievements?|awards?|honors?/i.test(l));
+  if (achStart === -1) return achievements;
+
+  const nextSectionIdx = lines.findIndex((l, i) => i > achStart && /^(education|experience|skills|technical|projects|certifications|training|languages|personal|declaration|summary|objective|contact|employment|work|internship)/i.test(l));
+  const achLines = nextSectionIdx === -1 ? lines.slice(achStart + 1) : lines.slice(achStart + 1, nextSectionIdx);
+
+  for (const line of achLines) {
+    if (line.length > 3) {
+      achievements.push(line);
+    }
+  }
+
+  return achievements;
+}
+
+// Extract languages from resume text
+function extractLanguages(text: string): { name: string; proficiency: string }[] {
+  const languages: { name: string; proficiency: string }[] = [];
+  // Look for "Languages: Hindi, English" pattern
+  const langMatch = text.match(/languages?\s*[:\-]?\s*([^\n|]+)/i);
+  if (langMatch) {
+    const langText = langMatch[1].replace(/^(hindi|english|spanish|french|german|sanskrit|telugu|tamil|kannada|bengali|marathi|gujarati|punjabi|urdu)\s*[,;]?\s*/i, "").trim();
+    const found = langMatch[1].split(/[,;|]/).map(l => l.trim()).filter(Boolean);
+    for (const lang of found) {
+      const profMatch = lang.match(/\(([^)]+)\)/);
+      languages.push({
+        name: lang.replace(/\s*\([^)]*\)/, "").trim(),
+        proficiency: profMatch ? profMatch[1] : "",
+      });
+    }
+  }
+  return languages;
+}
+
+// Extract personal details / contact info from resume text
+function extractPersonalDetails(text: string): { name: string; email: string; phone: string; location: string; links: string[] } {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+
+  // Name is usually the first non-empty line
+  const name = lines[0] || "";
+
+  // Email
+  const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  const email = emailMatch ? emailMatch[0] : "";
+
+  // Phone
+  const phoneMatch = text.match(/(\+?\d[\d\s\-()]{8,})/);
+  const phone = phoneMatch ? phoneMatch[0].trim() : "";
+
+  // Location
+  const locMatch = text.match(/(?:location|address|city)\s*[:\-]?\s*([^\n|]+)/i);
+  const location = locMatch ? locMatch[1].trim() : "";
+
+  // Links
+  const links: string[] = [];
+  const linkedinMatch = text.match(/(https?:\/\/)?(www\.)?linkedin\.com\/in\/[\w-]+/i);
+  if (linkedinMatch) links.push(linkedinMatch[0]);
+  const githubMatch = text.match(/(https?:\/\/)?(www\.)?github\.com\/[\w-]+/i);
+  if (githubMatch) links.push(githubMatch[0]);
+  const portfolioMatch = text.match(/(https?:\/\/)?(www\.)?[\w.-]+\.[a-z]{2,}(\/\S*)?/i);
+  if (portfolioMatch && !linkedinMatch && !githubMatch) links.push(portfolioMatch[0]);
+
+  return { name, email, phone, location, links };
+}
+
+// Extract summary/objective from resume text
+function extractSummarySection(text: string): string {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const summaryStart = lines.findIndex(l => /^(summary|objective|profile|about|career objective|professional summary)/i.test(l));
+  if (summaryStart === -1) return "";
+
+  const nextSectionIdx = lines.findIndex((l, i) => i > summaryStart && /^(education|experience|skills|technical|projects|certifications|achievements|training|languages|personal|declaration|contact|employment|work|internship)/i.test(l));
+  const summaryLines = nextSectionIdx === -1 ? lines.slice(summaryStart + 1) : lines.slice(summaryStart + 1, nextSectionIdx);
+  return summaryLines.join(" ");
+}
 
 export async function getFallbackResumeExtraction(fileBuffer: Buffer, mimeType: string): Promise<FallbackResumeResult> {
   let text: string;
@@ -396,10 +608,19 @@ export async function getFallbackResumeExtraction(fileBuffer: Buffer, mimeType: 
   }
 
   const skills = extractSkillsFromText(text);
-  const summary = buildSummary(skills, text);
+  const extractedSummary = extractSummarySection(text);
+  const summary = extractedSummary || buildSummary(skills, text);
   const reviewNotes = skills.length > 0
     ? `Found ${skills.length} skill${skills.length > 1 ? "s" : ""}. Proficiency levels are estimated from mention frequency — adjust them based on your actual experience. This is a basic extraction without AI; add an OPENAI_API_KEY for deeper analysis.`
     : "No skills were detected. This could be because the PDF is image-based (scanned) or uses unusual formatting. Try uploading a text-based PDF, or add an OPENAI_API_KEY for AI-powered extraction.";
 
-  return { skills, summary, reviewNotes };
+  const education = extractEducation(text);
+  const experience = extractExperience(text);
+  const projects = extractProjects(text);
+  const certifications = extractCertifications(text);
+  const achievements = extractAchievements(text);
+  const languages = extractLanguages(text);
+  const personalDetails = extractPersonalDetails(text);
+
+  return { skills, summary, reviewNotes, rawText: text, education, experience, projects, certifications, achievements, languages, personalDetails };
 }
