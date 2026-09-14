@@ -1,165 +1,154 @@
-import { and, desc, eq, gt, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import { InsertResume, InsertUser, referralRewards, resumes, users, upiVerifications, withdrawalRequests } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import mongoose from "mongoose";
+import { ENV } from "./env";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+// Mongoose is CommonJS; use the default export and access members off it.
+const { model, models, Schema } = mongoose;
+type InferSchemaType<T extends mongoose.Schema> = mongoose.InferSchemaType<T>;
 
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
-    try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
-    }
+// -----------------------------------------------------------------------------
+// Connection
+// -----------------------------------------------------------------------------
+
+let connected = false;
+let memoryServer: import("mongodb-memory-server").MongoMemoryServer | null = null;
+
+async function resolveMongoUri(): Promise<string> {
+  if (ENV.useInMemoryMongo && !ENV.isProduction) {
+    const { MongoMemoryServer } = await import("mongodb-memory-server");
+    memoryServer = await MongoMemoryServer.create();
+    const uri = memoryServer.getUri();
+    console.log(`[Database] Using in-memory MongoDB at ${uri}`);
+    return uri;
   }
-  return _db;
+  return ENV.mongoUri;
 }
 
-export async function upsertUser(user: InsertUser): Promise<void> {
-  if (!user.openId) throw new Error("User openId is required for upsert");
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot upsert user: database not available");
-    return;
+export async function connectDb() {
+  if (connected) return;
+  try {
+    mongoose.set("strictQuery", true);
+    const uri = await resolveMongoUri();
+    await mongoose.connect(uri);
+    connected = true;
+    console.log("[Database] Connected to MongoDB");
+  } catch (error) {
+    console.warn("[Database] Failed to connect:", error);
   }
-  const values: InsertUser = { openId: user.openId };
-  const updateSet: Record<string, unknown> = {};
-  const textFields = ["name", "email", "loginMethod"] as const;
-  type TextField = (typeof textFields)[number];
-  const assignNullable = (field: TextField) => {
-    const value = user[field];
-    if (value === undefined) return;
-    const normalized = value ?? null;
-    values[field] = normalized;
-    updateSet[field] = normalized;
-  };
-  textFields.forEach(assignNullable);
-  if (user.lastSignedIn !== undefined) {
-    values.lastSignedIn = user.lastSignedIn;
-    updateSet.lastSignedIn = user.lastSignedIn;
+}
+
+// -----------------------------------------------------------------------------
+// Schemas
+// -----------------------------------------------------------------------------
+
+const userSchema = new Schema(
+  {
+    name: { type: String, default: null },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    passwordHash: { type: String, required: true },
+    headline: { type: String, default: null },
+    university: { type: String, default: null },
+    graduationYear: { type: Number, default: null },
+    loginMethod: { type: String, default: "email" },
+    role: { type: String, enum: ["user", "admin"], default: "user" },
+    lastSignedIn: { type: Date, default: () => new Date() },
+    passwordResetToken: { type: String, default: null },
+    passwordResetExpires: { type: Date, default: null },
+  },
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+const resumeSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    fileName: { type: String, required: true },
+    mimeType: { type: String, required: true },
+    storageKey: { type: String, required: true },
+    extractedSkills: { type: String, required: true },
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+const referralRewardSchema = new Schema(
+  {
+    referrerUserId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    referredName: { type: String, required: true },
+    event: { type: String, required: true },
+    amount: { type: Number, required: true },
+    status: { type: String, enum: ["pending", "credited", "reversed"], default: "pending" },
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+const upiVerificationSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    upiId: { type: String, required: true },
+    status: { type: String, enum: ["verified", "rejected"], default: "rejected" },
+    verifiedAt: { type: Date, default: null },
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+const withdrawalRequestSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    amount: { type: Number, required: true },
+    payoutMethod: { type: String, required: true },
+    upiVerificationId: { type: Schema.Types.ObjectId, ref: "UpiVerification" },
+    status: { type: String, enum: ["requested", "processing", "paid", "rejected"], default: "requested" },
+  },
+  { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
+// Mongoose exposes an `id` virtual (string of _id) by default; ensure it shows
+// up in JSON responses so the API returns `id` alongside `_id`.
+userSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+resumeSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+referralRewardSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+upiVerificationSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+withdrawalRequestSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+
+// -----------------------------------------------------------------------------
+// Models
+// -----------------------------------------------------------------------------
+
+export const UserModel = models.User ?? model("User", userSchema);
+export const ResumeModel = models.Resume ?? model("Resume", resumeSchema);
+export const ReferralRewardModel = models.ReferralReward ?? model("ReferralReward", referralRewardSchema);
+export const UpiVerificationModel = models.UpiVerification ?? model("UpiVerification", upiVerificationSchema);
+export const WithdrawalRequestModel = models.WithdrawalRequest ?? model("WithdrawalRequest", withdrawalRequestSchema);
+
+// -----------------------------------------------------------------------------
+// Types (mirror the shape the frontend expects)
+// -----------------------------------------------------------------------------
+
+export type UserDoc = InferSchemaType<typeof userSchema> & { id: string; _id: mongoose.Types.ObjectId };
+export type ResumeDoc = InferSchemaType<typeof resumeSchema> & { id: string; _id: mongoose.Types.ObjectId };
+export type ReferralRewardDoc = InferSchemaType<typeof referralRewardSchema> & { id: string };
+export type UpiVerificationDoc = InferSchemaType<typeof upiVerificationSchema> & { id: string; _id: import("mongoose").Types.ObjectId };
+export type WithdrawalRequestDoc = InferSchemaType<typeof withdrawalRequestSchema> & { id: string };
+
+// Strip the passwordHash and mongoose internals for API responses.
+// Handles both full Mongoose documents (have toObject) and lean/plain objects.
+export function sanitizeUser(user: unknown): Record<string, unknown> {
+  let obj: Record<string, unknown>;
+  if (user && typeof (user as { toObject?: unknown }).toObject === "function") {
+    // Full Mongoose document — convert to plain object including virtuals.
+    obj = (user as { toObject: (opts?: Record<string, unknown>) => Record<string, unknown> }).toObject({
+      virtuals: true,
+    });
+  } else {
+    obj = { ...(user as Record<string, unknown>) };
   }
-  if (user.role !== undefined) {
-    values.role = user.role;
-    updateSet.role = user.role;
-  } else if (user.openId === ENV.ownerOpenId) {
-    values.role = 'admin';
-    updateSet.role = 'admin';
+  delete obj.passwordHash;
+  delete obj.__v;
+  delete obj.$__;
+  delete obj.$isNew;
+  delete obj._doc;
+  delete obj.$isDocument;
+  // Ensure a string `id` is always present (lean objects lack the virtual).
+  if (!obj.id && obj._id) {
+    obj.id = String(obj._id);
   }
-  if (!values.lastSignedIn) values.lastSignedIn = new Date();
-  if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
-}
-
-export async function getUserByOpenId(openId: string) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
-}
-
-export async function updateUserProfile(userId: number, profile: Pick<InsertUser, "name" | "headline" | "university" | "graduationYear">) {
-  const db = await getDb();
-  if (!db) return undefined;
-  await db.update(users).set({ ...profile, updatedAt: new Date() }).where(eq(users.id, userId));
-  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  return result[0];
-}
-
-export async function createResume(resume: InsertResume) {
-  const db = await getDb();
-  if (!db) {
-    console.warn("[Database] Cannot save resume: database not available");
-    return undefined;
-  }
-  const result = await db.insert(resumes).values(resume);
-  return result;
-}
-
-export async function getLatestResume(userId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(resumes).where(eq(resumes.userId, userId)).orderBy(desc(resumes.createdAt)).limit(1);
-  return result[0];
-}
-
-export async function updateResumeSkills(id: number, userId: number, extractedSkills: string) {
-  const db = await getDb();
-  if (!db) return false;
-  const result = await db.update(resumes)
-    .set({ extractedSkills })
-    .where(and(eq(resumes.id, id), eq(resumes.userId, userId)));
-  return Boolean(result);
-}
-
-export async function getReferralRewards(userId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(referralRewards).where(eq(referralRewards.referrerUserId, userId)).orderBy(desc(referralRewards.createdAt));
-}
-
-export async function getWithdrawalRequests(userId: number) {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select().from(withdrawalRequests).where(eq(withdrawalRequests.userId, userId)).orderBy(desc(withdrawalRequests.createdAt));
-}
-
-export async function getReferralLeaderboard() {
-  const db = await getDb();
-  if (!db) return [];
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  return db.select({
-    userId: referralRewards.referrerUserId,
-    name: users.name,
-    successfulReferrals: sql<number>`count(*)`,
-    totalEarned: sql<number>`coalesce(sum(${referralRewards.amount}), 0)`,
-  }).from(referralRewards).innerJoin(users, eq(users.id, referralRewards.referrerUserId)).where(and(eq(referralRewards.status, "credited"), gt(referralRewards.createdAt, monthStart))).groupBy(referralRewards.referrerUserId, users.name).orderBy(sql`sum(${referralRewards.amount}) desc`).limit(10);
-}
-
-export async function getLatestUpiVerification(userId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  const result = await db.select().from(upiVerifications).where(eq(upiVerifications.userId, userId)).orderBy(desc(upiVerifications.createdAt)).limit(1);
-  return result[0];
-}
-
-export async function createUpiVerification(userId: number, upiId: string, status: "verified" | "rejected") {
-  const db = await getDb();
-  if (!db) return undefined;
-  return db.insert(upiVerifications).values({ userId, upiId, status, verifiedAt: status === "verified" ? new Date() : null });
-}
-
-export async function createWithdrawalRequest(userId: number, amount: number, payoutMethod: string, upiVerificationId: number) {
-  const db = await getDb();
-  if (!db) return undefined;
-  return db.insert(withdrawalRequests).values({ userId, amount, payoutMethod, upiVerificationId, status: "requested" });
-}
-
-export async function getAllWithdrawalRequests() {
-  const db = await getDb();
-  if (!db) return [];
-  return db.select({
-    id: withdrawalRequests.id,
-    userId: withdrawalRequests.userId,
-    userName: users.name,
-    userEmail: users.email,
-    amount: withdrawalRequests.amount,
-    payoutMethod: withdrawalRequests.payoutMethod,
-    status: withdrawalRequests.status,
-    createdAt: withdrawalRequests.createdAt,
-    upiId: upiVerifications.upiId,
-  }).from(withdrawalRequests)
-    .innerJoin(users, eq(users.id, withdrawalRequests.userId))
-    .leftJoin(upiVerifications, eq(upiVerifications.id, withdrawalRequests.upiVerificationId))
-    .orderBy(desc(withdrawalRequests.createdAt));
-}
-
-export async function updateWithdrawalRequestStatus(id: number, status: "processing" | "paid" | "rejected") {
-  const db = await getDb();
-  if (!db) return false;
-  const result = await db.update(withdrawalRequests).set({ status }).where(eq(withdrawalRequests.id, id));
-  return Boolean(result);
+  return obj;
 }

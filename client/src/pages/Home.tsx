@@ -1,5 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
+import { adminApi, profileApi, queryKeys, referralsApi, resumeApi, supportApi } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AIChatBox, type Message } from "@/components/AIChatBox";
 import {
   ArrowUpRight,
@@ -38,7 +40,6 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { trpc } from "@/lib/trpc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -60,7 +61,7 @@ type Move = {
 
 type ExtractedResume = {
   fileName: string;
-  resumeId: number;
+  resumeId: string;
   summary: string;
   reviewNotes: string;
   skills: { name: string; level: number; evidence: string }[];
@@ -182,10 +183,10 @@ function SectionHeading({ eyebrow, title, action }: { eyebrow: string; title: st
 
 export default function Home() {
   const { user, loading, error, logout } = useAuth();
-  const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
   const [activeView, setActiveView] = useState<NavKey>("overview");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>({ name: "", headline: "", university: "", graduationYear: "" });
-  const [skills, setSkills] = useState<Skill[]>(initialSkills);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [completedMoves, setCompletedMoves] = useState<number[]>([2]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
@@ -202,34 +203,58 @@ export default function Home() {
   ]);
   const [extractedResume, setExtractedResume] = useState<ExtractedResume | null>(null);
   const resumeInputRef = useRef<HTMLInputElement>(null);
+
+  // Load saved resume data on mount so skills persist across refreshes.
+  const resumeQuery = useQuery({
+    queryKey: queryKeys.resumeLatest,
+    queryFn: resumeApi.latest,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  useEffect(() => {
+    if (resumeQuery.data) {
+      const extracted = resumeQuery.data as ExtractedResume;
+      setExtractedResume(extracted);
+      const tones: Skill["tone"][] = ["mint", "blue", "amber", "pink"];
+      setSkills(extracted.skills.map((skill, index) => ({ name: skill.name, level: skill.level, tone: tones[index % tones.length] })));
+    }
+  }, [resumeQuery.data]);
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  const extractResumeMutation = trpc.resume.extractSkills.useMutation({
-    onSuccess: (result) => {
+  const extractResumeMutation = useMutation({
+    mutationFn: resumeApi.extractSkills,
+    onSuccess: async (result) => {
       const extracted = result as ExtractedResume;
       setExtractedResume(extracted);
-      extracted.skills.forEach((skill) => addSkill({ name: skill.name, level: skill.level, tone: "mint" }));
+      const tones: Skill["tone"][] = ["mint", "blue", "amber", "pink"];
+      setSkills(extracted.skills.map((skill, index) => ({ name: skill.name, level: skill.level, tone: tones[index % tones.length] })));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.resumeLatest });
       toast.success(`${extracted.skills.length} skills extracted from your resume.`);
     },
-    onError: (error) => toast.error(error.message || "Resume extraction failed. Please try again."),
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : "Resume extraction failed. Please try again."),
   });
-  const saveResumeMutation = trpc.resume.saveEdits.useMutation({
+  const saveResumeMutation = useMutation({
+    mutationFn: resumeApi.saveEdits,
     onSuccess: () => toast.success("Your edited skills were saved."),
-    onError: (error) => toast.error(error.message || "Could not save skill edits."),
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : "Could not save skill edits."),
   });
-  const supportChatMutation = trpc.support.chat.useMutation({
+  const supportChatMutation = useMutation({
+    mutationFn: supportApi.chat,
     onSuccess: (response) => setChatMessages((current) => [...current, { role: "assistant", content: response.content }]),
-    onError: (error) => toast.error(error.message || "The Help Center assistant is unavailable right now."),
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : "The Help Center assistant is unavailable right now."),
   });
-  const profileMutation = trpc.profile.update.useMutation({
+  const profileMutation = useMutation({
+    mutationFn: profileApi.update,
     onSuccess: async (updated) => {
-      utils.auth.me.setData(undefined, updated);
-      await utils.auth.me.invalidate();
+      queryClient.setQueryData(queryKeys.authMe, updated);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.authMe });
       toast.success("Your profile is saved.");
     },
-    onError: (profileError) => toast.error(profileError.message || "Could not save your profile."),
+    onError: (profileError: unknown) => toast.error(profileError instanceof Error ? profileError.message : "Could not save your profile."),
   });
 
   useEffect(() => {
@@ -246,7 +271,10 @@ export default function Home() {
   const firstName = displayName.split(" ")[0];
   const timeGreeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
   const dailyQuote = getDailyQuote(now);
-  const profileCompletion = Math.min(100, 62 + (skills.length - initialSkills.length) * 6);
+  const profileCompletion = extractedResume ? Math.min(100, 62 + skills.length * 6) : 0;
+  const skillScore = extractedResume && skills.length > 0
+    ? (skills.reduce((sum, s) => sum + s.level, 0) / skills.length / 20).toFixed(1)
+    : "0.0";
   const filteredJobs = useMemo(
     () => jobs.filter((job) => `${job.company} ${job.role} ${job.location}`.toLowerCase().includes(jobSearch.toLowerCase())),
     [jobSearch],
@@ -336,7 +364,7 @@ export default function Home() {
     <div className="app-shell">
       <aside className={`app-sidebar ${mobileNavOpen ? "is-open" : ""}`}>
         <div className="brand-lockup">
-          <div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div>
+          <div className="brand-mark"><img src="/img1.jpeg" alt="NK Care logo" /></div>
           <div>
             <span className="brand-name">student care help</span>
             <span className="brand-caption">support for every student</span>
@@ -350,7 +378,7 @@ export default function Home() {
             <button key={key} className={`nav-item ${activeView === key ? "is-active" : ""}`} onClick={() => changeView(key)}>
               <Icon size={17} />
               <span>{label}</span>
-              {key === "matches" ? <span className="nav-count">12</span> : null}
+              {key === "matches" ? null : null}
             </button>
           ))}
         </nav>
@@ -422,23 +450,29 @@ export default function Home() {
                 </div>
                 <div className="hero-card__visual">
                   <div className="orbit orbit--one" /><div className="orbit orbit--two" />
-                  <div className="hero-badge hero-badge--top"><BarChart3 size={15} /><span>+18%<small>this month</small></span></div>
-                  <div className="hero-ring"><span>4.2</span><small>skill score</small></div>
-                  <div className="hero-badge hero-badge--bottom"><div className="mini-stack"><span>R</span><span>J</span><span>S</span></div><span>3 roles<small>newly unlocked</small></span></div>
+                  {extractedResume ? (
+                    <>
+                      <div className="hero-badge hero-badge--top"><BarChart3 size={15} /><span>+18%<small>this month</small></span></div>
+                      <div className="hero-ring"><span>{skillScore}</span><small>skill score</small></div>
+                      <div className="hero-badge hero-badge--bottom"><div className="mini-stack"><span>R</span><span>J</span><span>S</span></div><span>3 roles<small>newly unlocked</small></span></div>
+                    </>
+                  ) : (
+                    <div className="hero-ring hero-ring--empty"><span>—</span><small>upload resume</small></div>
+                  )}
                 </div>
               </section>
 
               <section className="metric-grid">
                 <div className="metric-card metric-card--accent"><div className="metric-label"><span>Profile strength</span><Gauge size={16} /></div><strong>{profileCompletion}%</strong><div className="metric-foot"><span className="trend-up">+8% <ArrowUpRight size={12} /></span> from last week</div></div>
-                <div className="metric-card"><div className="metric-label"><span>Role matches</span><BriefcaseBusiness size={16} /></div><strong>12</strong><div className="metric-foot"><span className="trend-up">+3 new</span> since Monday</div></div>
-                <div className="metric-card"><div className="metric-label"><span>Practice streak</span><Flame size={16} /></div><strong>06 <small>days</small></strong><div className="metric-foot"><span className="trend-warm">Keep it going</span> 2 sessions left</div></div>
+                <div className="metric-card"><div className="metric-label"><span>Role matches</span><BriefcaseBusiness size={16} /></div><strong>{extractedResume ? "12" : "0"}</strong><div className="metric-foot"><span className="trend-up">+3 new</span> since Monday</div></div>
+                <div className="metric-card"><div className="metric-label"><span>Practice streak</span><Flame size={16} /></div><strong>{extractedResume ? "06" : "00"} <small>days</small></strong><div className="metric-foot"><span className="trend-warm">Keep it going</span> 2 sessions left</div></div>
               </section>
 
               <div className="content-grid content-grid--main">
                 <section className="panel moves-panel">
                   <SectionHeading eyebrow="RECOMMENDED FOR YOU" title="Your next best moves" action="See all" />
                   <div className="move-list">
-                    {moves.map((move) => {
+                    {extractedResume ? moves.map((move) => {
                       const complete = completedMoves.includes(move.id);
                       const Icon = move.icon;
                       return <div className={`move-row ${complete ? "is-complete" : ""}`} key={move.id}>
@@ -448,15 +482,15 @@ export default function Home() {
                         <span className="move-tag">{move.tag}</span>
                         <button className="row-arrow" onClick={() => changeView(move.id === 1 ? "roadmap" : move.id === 2 ? "profile" : "practice")} aria-label={`Open ${move.label}`}><ChevronRight size={17} /></button>
                       </div>;
-                    })}
+                    }) : <div className="admin-empty"><strong>No recommendations yet</strong><p>Upload your resume to unlock personalized next moves.</p></div>}
                   </div>
                 </section>
 
                 <section className="panel score-panel">
                   <SectionHeading eyebrow="READINESS SNAPSHOT" title="Your profile at a glance" />
-                  <div className="score-layout"><ProgressRing value={profileCompletion} /><div className="score-copy"><strong>Looking good, {firstName}.</strong><p>You’re ahead of 68% of students in your cohort. Add one project to reach “interview ready”.</p><button className="text-button" onClick={() => changeView("profile")}>Improve profile <ArrowUpRight size={15} /></button></div></div>
+                  <div className="score-layout"><ProgressRing value={profileCompletion} /><div className="score-copy"><strong>{extractedResume ? `Looking good, ${firstName}.` : "Let's get started."}</strong><p>{extractedResume ? "You’re ahead of 68% of students in your cohort. Add one project to reach “interview ready”." : "Upload your resume to unlock your readiness snapshot and personalized recommendations."}</p><button className="text-button" onClick={() => changeView("profile")}>{extractedResume ? "Improve profile" : "Upload resume"} <ArrowUpRight size={15} /></button></div></div>
                   <div className="score-divider" />
-                  <div className="score-meta"><div><span>Projects</span><strong>2 <small>/ 3 recommended</small></strong></div><div><span>Core skills</span><strong>{skills.length} <small>tracked</small></strong></div></div>
+                  <div className="score-meta"><div><span>Projects</span><strong>{extractedResume ? "2" : "0"} <small>/ 3 recommended</small></strong></div><div><span>Core skills</span><strong>{extractedResume ? skills.length : 0} <small>tracked</small></strong></div></div>
                 </section>
               </div>
 
@@ -464,22 +498,24 @@ export default function Home() {
                 <section className="panel skills-panel">
                   <SectionHeading eyebrow="SKILL VELOCITY" title="What’s moving your score" action="Manage skills" />
                   <div className="skill-list">
-                    {skills.slice(0, 4).map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}
+                    {extractedResume ? skills.slice(0, 4).map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>) : <div className="admin-empty"><strong>No skills tracked yet</strong><p>Upload your resume to extract your skills and see what’s moving your score.</p></div>}
                   </div>
                 </section>
                 <section className="panel pulse-panel">
                   <SectionHeading eyebrow="MARKET PULSE" title="Roles hiring around you" />
+                  {extractedResume ? (<>
                   <div className="pulse-main"><div className="pulse-number">+24<span>%</span></div><div><strong>Frontend roles</strong><p>more listings this week</p></div><div className="sparkline"><span style={{ height: "38%" }} /><span style={{ height: "54%" }} /><span style={{ height: "46%" }} /><span style={{ height: "68%" }} /><span style={{ height: "61%" }} /><span style={{ height: "86%" }} /><span style={{ height: "100%" }} /></div></div>
                   <div className="pulse-footer"><span><span className="legend-dot legend-dot--green" /> React</span><span>1,240 open roles</span><ChevronRight size={16} /></div>
+                  </>) : <div className="admin-empty"><strong>Market pulse locked</strong><p>Upload your resume to see hiring trends matched to your skills.</p></div>}
                 </section>
               </div>
             </>
           ) : null}
 
           {activeView === "profile" ? <ProfileView displayName={displayName} email={user.email || ""} profile={profileDraft} isProfileSaving={profileMutation.isPending} onProfileChange={(field, value) => setProfileDraft((current) => ({ ...current, [field]: value }))} onSaveProfile={handleSaveProfile} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} /> : null}
-          {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} /> : null}
-          {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} /> : null}
-          {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} /> : null}
+          {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} /> : null}
           {activeView === "refer" ? <ReferralView onBack={() => changeView("overview")} /> : null}
           {activeView === "admin" && user?.role === "admin" ? <AdminWithdrawalsView onBack={() => changeView("overview")} /> : null}
         </div>
@@ -490,17 +526,18 @@ export default function Home() {
 }
 
 function AuthLoadingScreen() {
-  return <div className="auth-screen"><div className="auth-loading-card"><div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div><div><strong>Opening your workspace</strong><span>Checking your account securely…</span></div><Sparkles size={17} className="spin-slow" /></div></div>;
+  return <div className="auth-screen"><div className="auth-loading-card"><div className="brand-mark"><img src="/img1.jpeg" alt="NK Care logo" /></div><div><strong>Opening your workspace</strong><span>Checking your account securely…</span></div><Sparkles size={17} className="spin-slow" /></div></div>;
 }
 
 function AuthLanding({ error }: { error: boolean }) {
-  return <div className="auth-screen"><div className="auth-orbit auth-orbit--one" /><div className="auth-orbit auth-orbit--two" /><main className="auth-card"><div className="auth-card__brand"><div className="brand-mark"><Sparkles size={17} strokeWidth={2.6} /></div><div><strong>student care help</strong><span>support for every student</span></div></div><div className="auth-card__content"><p className="eyebrow eyebrow--green"><span className="status-dot" /> YOUR CAREER WORKSPACE</p><h1>Build a profile that feels like <span>you.</span></h1><p className="auth-card__copy">Save your skills, resume signal, roadmap, and role matches in one calm workspace made for your next opportunity.</p>{error ? <div className="auth-alert"><CircleHelp size={15} /><span>Your session ended. Log in again to reopen your workspace.</span></div> : null}<div className="auth-actions"><button className="primary-button auth-button" onClick={() => startLogin()}><LogIn size={16} /> Log in</button><button className="quiet-button auth-secondary" onClick={() => startLogin()}><UserPlus size={16} /> Create account</button></div><p className="auth-note">New here? Choose <strong>Create account</strong>. Already have an account? Choose <strong>Log in</strong>. Both options use secure Manus authentication.</p></div><div className="auth-card__footer"><span><ShieldCheck size={14} /> Secure sign-in</span><span><UserRound size={14} /> Personal profile</span><span><Target size={14} /> Clear next steps</span></div></main></div>;
+  return <div className="auth-screen"><div className="auth-orbit auth-orbit--one" /><div className="auth-orbit auth-orbit--two" /><main className="auth-card"><div className="auth-card__brand"><div className="brand-mark"><img src="/img1.jpeg" alt="NK Care logo" /></div><div><strong>student care help</strong><span>support for every student</span></div></div><div className="auth-card__content"><p className="eyebrow eyebrow--green"><span className="status-dot" /> YOUR CAREER WORKSPACE</p><h1>Build a profile that feels like <span>you.</span></h1><p className="auth-card__copy">Save your skills, resume signal, roadmap, and role matches in one calm workspace made for your next opportunity.</p>{error ? <div className="auth-alert"><CircleHelp size={15} /><span>Your session ended. Log in again to reopen your workspace.</span></div> : null}<div className="auth-actions"><button className="primary-button auth-button" onClick={() => startLogin()}><LogIn size={16} /> Log in</button><button className="quiet-button auth-secondary" onClick={() => startLogin()}><UserPlus size={16} /> Create account</button></div><p className="auth-note">New here? Choose <strong>Create account</strong>. Already have an account? Choose <strong>Log in</strong>. Both options use secure email authentication.</p></div><div className="auth-card__footer"><span><ShieldCheck size={14} /> Secure sign-in</span><span><UserRound size={14} /> Personal profile</span><span><Target size={14} /> Clear next steps</span></div></main></div>;
 }
 
 function ProfileView({ displayName, email, profile, isProfileSaving, onProfileChange, onSaveProfile, skills, extraction, isExtracting, isSaving, onSaveExtraction, onAddSkill, onUpload }: { displayName: string; email: string; profile: ProfileDraft; isProfileSaving: boolean; onProfileChange: (field: keyof ProfileDraft, value: string) => void; onSaveProfile: () => void; skills: Skill[]; extraction: ExtractedResume | null; isExtracting: boolean; isSaving: boolean; onSaveExtraction: (next: ExtractedResume) => void; onAddSkill: (skill: Skill) => void; onUpload: () => void }) {
+  const hasResume = Boolean(extraction);
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UserRound size={14} /> YOUR PROFILE</p><h1>Make your signal clearer.</h1><p>Recruiters see your profile before they see your potential. Keep the signal sharp.</p></div><button className="primary-button" onClick={onSaveProfile} disabled={isProfileSaving}><Check size={16} /> {isProfileSaving ? "Saving…" : "Save changes"}</button></div>
-    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{(profile.name || displayName).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{profile.name || displayName}</h2><p>{email || "Add an email through account sign-in"}</p></div></div><div className="profile-fields"><label>Full name<input value={profile.name} onChange={(event) => onProfileChange("name", event.target.value)} placeholder="Your name" /></label><label>Headline<input value={profile.headline} onChange={(event) => onProfileChange("headline", event.target.value)} placeholder="B.Tech CSE student · Frontend developer" /></label><label>University<input value={profile.university} onChange={(event) => onProfileChange("university", event.target.value)} placeholder="Your university" /></label><label>Graduation year<input value={profile.graduationYear} onChange={(event) => onProfileChange("graduationYear", event.target.value.replace(/[^0-9]/g, "").slice(0, 4))} inputMode="numeric" placeholder="2026" /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : "PDF, DOC or DOCX · up to 6 MB"}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
-       <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} />{extraction ? <EditableExtraction extraction={extraction} isSaving={isSaving} onSave={onSaveExtraction} /> : null}<div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div><div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div></section></div>
+    <div className="profile-layout"><section className="panel profile-card"><div className="profile-card__top"><div className="avatar avatar--large">{(profile.name || displayName).split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><span className="verified-label"><span /> Profile visible to recruiters</span><h2>{profile.name || displayName}</h2><p>{email || "Add an email through account sign-in"}</p></div></div><div className="profile-fields"><label>Full name<input value={profile.name} onChange={(event) => onProfileChange("name", event.target.value)} placeholder="Your name" /></label><label>Headline<input value={profile.headline} onChange={(event) => onProfileChange("headline", event.target.value)} placeholder={hasResume ? "B.Tech CSE student · Frontend developer" : ""} /></label><label>University<input value={profile.university} onChange={(event) => onProfileChange("university", event.target.value)} placeholder={hasResume ? "Your university" : ""} /></label><label>Graduation year<input value={profile.graduationYear} onChange={(event) => onProfileChange("graduationYear", event.target.value.replace(/[^0-9]/g, "").slice(0, 4))} inputMode="numeric" placeholder={hasResume ? "2026" : ""} /></label></div><button className={`upload-card ${isExtracting ? "is-uploading" : ""}`} onClick={onUpload} disabled={isExtracting}><div className="upload-icon">{isExtracting ? <Sparkles size={18} className="spin-slow" /> : <Upload size={18} />}</div><div><strong>{isExtracting ? "AI is reading your resume…" : extraction ? "Analyze another resume" : "Upload latest resume"}</strong><span>{isExtracting ? "Extracting skills and evidence" : extraction ? `${extraction.fileName} · analyzed just now` : ""}</span></div><ChevronRight size={17} /></button>{extraction ? <div className="extraction-card"><div className="extraction-card__heading"><div><span className="eyebrow eyebrow--green"><Sparkles size={13} /> AI RESUME READ</span><h3>{extraction.skills.length} skills found</h3></div><span className="extraction-badge"><Check size={12} /> Saved</span></div><p>{extraction.summary}</p><div className="extracted-skill-grid">{extraction.skills.slice(0, 6).map((skill) => <div className="extracted-skill" key={skill.name}><div><strong>{skill.name}</strong><span>{skill.level}% signal</span></div><div className="skill-track"><span className="skill-fill skill-fill--mint" style={{ width: `${skill.level}%` }} /></div><small>{skill.evidence}</small></div>)}</div></div> : null}</section>
+       <section className="panel profile-skills"><SectionHeading eyebrow="YOUR SKILL GRAPH" title={`${skills.length} skills tracked`} />{extraction ? <EditableExtraction extraction={extraction} isSaving={isSaving} onSave={onSaveExtraction} /> : null}<div className="skill-list skill-list--profile">{skills.map((skill) => <div className="skill-row" key={skill.name}><div className={`skill-dot skill-dot--${skill.tone}`} /><strong>{skill.name}</strong><div className="skill-track"><span className={`skill-fill skill-fill--${skill.tone}`} style={{ width: `${skill.level}%` }} /></div><span className="skill-level">{skill.level}%</span></div>)}</div>{hasResume ? <div className="suggested-box"><div><Sparkles size={16} /><strong>Suggested next</strong></div><p>These skills can raise your role match fastest.</p><div className="suggested-chips">{suggestedSkills.map((skill) => <button key={skill.name} onClick={() => onAddSkill(skill)}><Plus size={13} /> {skill.name}</button>)}</div></div> : null}</section></div>
   </div>;
 }
 
@@ -523,11 +560,12 @@ function LegacyReferralView({ onBack }: { onBack: () => void }) {
 }
 
 function AdminWithdrawalsView({ onBack }: { onBack: () => void }) {
-  const utils = trpc.useUtils();
-  const { data: requests, isLoading, error } = trpc.admin.withdrawals.useQuery();
-  const reviewMutation = trpc.admin.updateWithdrawal.useMutation({
-    onSuccess: async (result) => { await utils.admin.withdrawals.invalidate(); toast.success(`Request marked ${result.status}.`); },
-    onError: (reviewError) => toast.error(reviewError.message || "Could not update withdrawal."),
+  const queryClient = useQueryClient();
+  const { data: requests, isLoading, error } = useQuery({ queryKey: queryKeys.adminWithdrawals, queryFn: adminApi.withdrawals });
+  const reviewMutation = useMutation({
+    mutationFn: adminApi.updateWithdrawal,
+    onSuccess: async (result) => { await queryClient.invalidateQueries({ queryKey: queryKeys.adminWithdrawals }); toast.success(`Request marked ${result.status}.`); },
+    onError: (reviewError: unknown) => toast.error(reviewError instanceof Error ? reviewError.message : "Could not update withdrawal."),
   });
   const rows = requests || [];
   const pendingCount = rows.filter((request) => request.status === "requested" || request.status === "processing").length;
@@ -541,16 +579,18 @@ function ReferralView({ onBack }: { onBack: () => void }) {
   const inviteLink = `https://pathfinder.app/join/${referralCode}`;
   const [withdrawalRequested, setWithdrawalRequested] = useState(false);
   const [copied, setCopied] = useState(false);
-  const utils = trpc.useUtils();
-  const { data: referralData } = trpc.referrals.dashboard.useQuery();
-  const verifyUpi = trpc.referrals.verifyUpi.useMutation({
-    onSuccess: async () => { await utils.referrals.dashboard.invalidate(); toast.success("UPI ID verified. You can now request a withdrawal."); },
-    onError: (error) => toast.error(error.message || "Could not verify UPI ID."),
+  const queryClient = useQueryClient();
+  const { data: referralData } = useQuery({ queryKey: queryKeys.referralsDashboard, queryFn: referralsApi.dashboard });
+  const verifyUpi = useMutation({
+    mutationFn: referralsApi.verifyUpi,
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: queryKeys.referralsDashboard }); toast.success("UPI ID verified. You can now request a withdrawal."); },
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : "Could not verify UPI ID."),
   });
   const [upiInput, setUpiInput] = useState("");
-  const requestWithdrawal = trpc.referrals.requestWithdrawal.useMutation({
+  const requestWithdrawal = useMutation({
+    mutationFn: referralsApi.requestWithdrawal,
     onSuccess: () => { setWithdrawalRequested(true); toast.success("Withdrawal request submitted for review."); },
-    onError: (error) => toast.error(error.message || "Could not submit withdrawal request."),
+    onError: (error: unknown) => toast.error(error instanceof Error ? error.message : "Could not submit withdrawal request."),
   });
   const copyLink = async () => { await navigator.clipboard?.writeText(inviteLink); setCopied(true); toast.success("Referral link copied."); window.setTimeout(() => setCopied(false), 2000); };
   const shareWhatsApp = () => window.open(`https://wa.me/?text=${encodeURIComponent(`Join me on Pathfinder and get your career roadmap: ${inviteLink}`)}`, "_blank", "noopener,noreferrer");
@@ -567,15 +607,24 @@ function ReferralView({ onBack }: { onBack: () => void }) {
   const historyRows = [...rewards.map((item) => ({ id: `reward-${item.id}`, title: `${item.referredName} ${item.event}`, subtitle: "Referral reward", date: item.createdAt, amount: `+₹${item.amount}`, status: item.status === "credited" ? "Credited" : "Pending" })), ...(referralData?.withdrawals || []).map((item) => ({ id: `withdrawal-${item.id}`, title: "Withdrawal request", subtitle: item.payoutMethod, date: item.createdAt, amount: `−₹${item.amount}`, status: item.status === "paid" ? "Paid" : "Processing" }))];
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder, track every reward, and see how your community is growing.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy"}</button></div><div className="share-actions"><button className="share-button share-button--whatsapp" onClick={shareWhatsApp}><MessageCircle size={15} /> Share on WhatsApp</button><button className="share-button share-button--email" onClick={shareEmail}><Mail size={15} /> Share by email</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> {rewards.length} friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹{creditedTotal || 300}</strong><small>₹{Math.max(0, (creditedTotal || 300) - 100)} available to withdraw</small></div><div className="referral-stat"><span>Successful referrals</span><strong>{rewards.filter((item) => item.status === "credited").length || 3}</strong><small>{rewards.length > 2 ? "This month" : "Keep inviting"}</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹{pendingTotal || 100}</strong><small>1 friend in progress</small></div></div><div className="referral-grid referral-grid--wide"><section className="panel reward-history"><SectionHeading eyebrow="REWARD HISTORY" title="Every earning, in one place" action="Export CSV" /><div className="reward-table"><div className="reward-table__head"><span>Activity</span><span>Date</span><span>Amount</span><span>Status</span></div>{historyRows.length ? historyRows.slice(0, 8).map((row) => <div className="reward-row" key={row.id}><div><strong>{row.title}</strong><span>{row.subtitle}</span></div><span>{dateLabel(row.date)}</span><b>{row.amount}</b><em className={row.status === "Credited" || row.status === "Paid" ? "status-positive" : "status-pending"}>{row.status}</em></div>) : <div className="empty-state"><Wallet size={18} /><strong>No reward activity yet</strong><p>Share your link to get started.</p></div>}</div><div className="upi-verification-card"><div><span className="eyebrow eyebrow--green"><ShieldCheck size={13} /> WITHDRAWAL SECURITY</span><strong>{verifiedUpi ? "UPI ID verified" : "Verify your UPI ID first"}</strong><small>{verifiedUpi ? verifiedUpi.upiId : "We verify the ID format before enabling withdrawals."}</small></div>{verifiedUpi ? <span className="upi-verified-pill"><Check size={12} /> Verified</span> : <div className="upi-input-row"><input value={upiInput} onChange={(event) => setUpiInput(event.target.value)} placeholder="name@bank" aria-label="UPI ID" /><button onClick={() => verifyUpi.mutate({ upiId: upiInput })} disabled={!upiInput.trim() || verifyUpi.isPending}>{verifyUpi.isPending ? "Checking…" : "Verify UPI"}</button></div>}</div><button className="withdraw-button" disabled={!verifiedUpi || withdrawalRequested || requestWithdrawal.isPending} onClick={() => requestWithdrawal.mutate({ amount: 200, payoutMethod: verifiedUpi?.upiId || "UPI", upiVerificationId: verifiedUpi!.id })}><Wallet size={15} /> {withdrawalRequested ? "Withdrawal request pending" : requestWithdrawal.isPending ? "Submitting request…" : "Request withdrawal · ₹200"}</button></section><section className="panel leaderboard-panel"><SectionHeading eyebrow="COMMUNITY LEADERBOARD" title={`Top referrers · ${monthLabel}`} action="View all" /><div className="leaderboard-callout"><Trophy size={17} /><span>Invite 2 more friends to reach <strong>Campus Champion</strong></span></div>{leaderboard.slice(0, 3).map((leader, index) => <div className={`leader-row ${index === 0 ? "leader-row--top" : ""}`} key={leader.userId}><span>0{index + 1}</span><div className={`avatar avatar--small ${index === 1 ? "avatar--blue" : index === 2 ? "avatar--pink" : "avatar--gold"}`}>#{leader.userId}</div><div><strong>{(leader as { name?: string }).name || `Referrer #${leader.userId}`}</strong><small>{leader.successfulReferrals} successful referrals</small></div><b>₹{leader.totalEarned}</b></div>)}<div className="leader-row leader-row--you"><span>07</span><div className="avatar avatar--small">AM</div><div><strong>You</strong><small>{rewards.filter((item) => item.status === "credited").length || 3} successful referrals</small></div><b>₹{creditedTotal || 300}</b></div></section></div></div>;
 }
-function RoadmapView({ completedMoves, onToggle, onBack }: { completedMoves: number[]; onToggle: (id: number) => void; onBack: () => void }) {
+function RoadmapView({ completedMoves, onToggle, onBack, hasResume, onUpload }: { completedMoves: number[]; onToggle: (id: number) => void; onBack: () => void; hasResume: boolean; onUpload: () => void }) {
+  if (!hasResume) {
+    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Target size={14} /> SKILL ROADMAP</p><h1>A plan you can actually finish.</h1><p>Small, role-relevant sprints. No endless course playlists.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-empty locked-state"><Target size={28} /><strong>Upload your resume to unlock your roadmap</strong><p>Your personalized skill roadmap is built from the skills detected in your resume. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div></div>;
+  }
   const roadmapSteps = [{ id: 1, week: "This week", title: "Close your DSA gap", text: "Arrays, hash maps and two-pointer patterns", status: completedMoves.includes(1) ? "Complete" : "In progress", color: "green" }, { id: 2, week: "Next week", title: "Ship one proof project", text: "Build a role-shaped React dashboard with an API", status: "Queued", color: "blue" }, { id: 3, week: "Week 08", title: "Practice the real screen", text: "Two timed frontend interviews with feedback", status: "Locked", color: "pink" }];
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Target size={14} /> SKILL ROADMAP</p><h1>A plan you can actually finish.</h1><p>Small, role-relevant sprints. No endless course playlists.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="roadmap-banner"><div className="roadmap-banner__number">01</div><div><span className="eyebrow">CURRENT MISSION</span><h2>Become interview-ready for frontend roles</h2><p>Three focused sprints · 4h 20m estimated</p></div><div className="roadmap-banner__progress"><strong>34%</strong><span>complete</span></div></div><div className="roadmap-list">{roadmapSteps.map((step, index) => <div className="roadmap-step" key={step.id}><div className={`timeline-dot timeline-dot--${step.color} ${step.status === "Complete" ? "is-done" : ""}`}>{step.status === "Complete" ? <Check size={14} /> : index + 1}</div>{index < roadmapSteps.length - 1 ? <div className="timeline-line" /> : null}<div className="roadmap-step__copy"><span className="eyebrow">{step.week}</span><h3>{step.title}</h3><p>{step.text}</p></div><div className={`status-chip status-chip--${step.color}`}>{step.status}</div><button className="row-arrow" onClick={() => onToggle(step.id)} aria-label={`Toggle ${step.title}`}><ChevronRight size={17} /></button></div>)}</div></div>;
 }
 
-function MatchesView({ jobs, search, onSearch, onBack }: { jobs: { company: string; role: string; match: number; location: string; logo: string }[]; search: string; onSearch: (value: string) => void; onBack: () => void }) {
+function MatchesView({ jobs, search, onSearch, onBack, hasResume, onUpload }: { jobs: { company: string; role: string; match: number; location: string; logo: string }[]; search: string; onSearch: (value: string) => void; onBack: () => void; hasResume: boolean; onUpload: () => void }) {
+  if (!hasResume) {
+    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><BriefcaseBusiness size={14} /> JOB MATCHES</p><h1>Roles that fit your signal.</h1><p>Ranked by your current skills, interests and the gaps you can close.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-empty locked-state"><BriefcaseBusiness size={28} /><strong>Upload your resume to see job matches</strong><p>Job matches are ranked by how well your extracted skills align with each role. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div></div>;
+  }
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><BriefcaseBusiness size={14} /> JOB MATCHES</p><h1>Roles that fit your signal.</h1><p>Ranked by your current skills, interests and the gaps you can close.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="match-toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search roles, companies or locations" /></div><span>{jobs.length} of 12 matches shown</span></div><div className="job-list">{jobs.length ? jobs.map((job) => <div className="job-card" key={job.company}><div className="company-logo">{job.logo}</div><div className="job-card__copy"><span>{job.company}</span><h3>{job.role}</h3><p>{job.location}</p></div><div className="match-score"><strong>{job.match}%</strong><span>match</span></div><button className="dark-button dark-button--small" onClick={() => toast.success(`${job.role} at ${job.company} saved to your shortlist.`)}>Shortlist <Plus size={15} /></button></div>) : <div className="empty-state"><Search size={20} /><strong>No roles found</strong><p>Try a broader search term.</p></div>}</div></div>;
 }
 
-function PracticeView({ onBack }: { onBack: () => void }) {
+function PracticeView({ onBack, hasResume, onUpload }: { onBack: () => void; hasResume: boolean; onUpload: () => void }) {
+  if (!hasResume) {
+    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-empty locked-state"><Code2 size={28} /><strong>Upload your resume to unlock practice drills</strong><p>Practice drills are tailored to your current skill levels. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div></div>;
+  }
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="practice-grid"><div className="practice-card practice-card--featured"><div className="practice-card__top"><span className="practice-label">RECOMMENDED</span><div className="practice-icon"><Code2 size={18} /></div></div><h2>React component screen</h2><p>Build a filterable user list with accessible states and clean component boundaries.</p><div className="practice-meta"><span><BookOpen size={14} /> 8 prompts</span><span><Flame size={14} /> 35 min</span></div><button className="dark-button" onClick={() => toast.success("Practice room opened. Timer ready in the next build.")}>Start practice <ChevronRight size={16} /></button></div><div className="practice-card"><div className="practice-card__top"><span className="practice-label practice-label--muted">WARM UP</span><div className="practice-icon practice-icon--blue"><BarChart3 size={18} /></div></div><h2>SQL for product analytics</h2><p>Translate a product question into a query and explain the tradeoffs.</p><div className="practice-meta"><span><BookOpen size={14} /> 6 prompts</span><span><Flame size={14} /> 20 min</span></div><button className="quiet-button quiet-button--border" onClick={() => toast.info("SQL warm-up will open in the next build.")}>View drill <ChevronRight size={16} /></button></div><div className="practice-card"><div className="practice-card__top"><span className="practice-label practice-label--muted">FOUNDATIONS</span><div className="practice-icon practice-icon--pink"><GraduationCap size={18} /></div></div><h2>Tell your project story</h2><p>Turn your strongest project into a clear two-minute interview narrative.</p><div className="practice-meta"><span><BookOpen size={14} /> 5 prompts</span><span><Flame size={14} /> 15 min</span></div><button className="quiet-button quiet-button--border" onClick={() => toast.info("Story coach will open in the next build.")}>View drill <ChevronRight size={16} /></button></div></div></div>;
 }
