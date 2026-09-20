@@ -1,11 +1,11 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "../../../shared/const";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { createSessionToken, type AuthedRequest } from "../auth";
+import { createSessionToken, SESSION_TOKEN_HEADER, type AuthedRequest } from "../auth";
 import { ENV } from "../env";
-import { UserModel, sanitizeUser } from "../db";
+import { ReferralRewardModel, UserModel, generateUniqueReferralCode, sanitizeUser } from "../db";
 
 const router = Router();
 
@@ -31,6 +31,7 @@ const registerSchema = z.object({
   name: z.string().trim().min(2, "Please enter your name").max(120),
   email: z.string().trim().email("Enter a valid email").max(320),
   password: z.string().min(6, "Password must be at least 6 characters").max(200),
+  referralCode: z.string().trim().max(40).optional(),
 });
 
 const loginSchema = z.object({
@@ -55,16 +56,34 @@ router.post("/register", async (req: Request, res: Response) => {
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid input" });
     return;
   }
-  const { name, email, password } = parsed.data;
+  const { name, email, password, referralCode } = parsed.data;
   const existing = await UserModel.findOne({ email });
   if (existing) {
     res.status(409).json({ error: "An account with this email already exists" });
     return;
   }
   const passwordHash = await bcrypt.hash(password, 10);
-  const user = await UserModel.create({ name, email, passwordHash, loginMethod: "email", lastSignedIn: new Date() });
+  const ownReferralCode = await generateUniqueReferralCode(name);
+  const user = await UserModel.create({ name, email, passwordHash, referralCode: ownReferralCode, loginMethod: "email", lastSignedIn: new Date() });
+
+  // If the new user joined via someone's invite link, credit the referrer.
+  if (referralCode) {
+    const referrer = await UserModel.findOne({ referralCode });
+    if (referrer && String(referrer._id) !== String(user._id)) {
+      await UserModel.updateOne({ _id: user._id }, { $set: { referredByUserId: referrer._id } });
+      await ReferralRewardModel.create({
+        referrerUserId: referrer._id,
+        referredName: name,
+        event: "joined",
+        amount: 100,
+        status: "credited",
+      });
+    }
+  }
   const token = await createSessionToken(user.id);
   res.cookie(COOKIE_NAME, token, sessionCookieOptions(req));
+  // Mobile clients store this and send it back as `Authorization: Bearer`.
+  res.setHeader(SESSION_TOKEN_HEADER, token);
   res.json(sanitizeUser(user as never));
 });
 
@@ -88,6 +107,7 @@ router.post("/login", async (req: Request, res: Response) => {
   await UserModel.updateOne({ _id: user._id }, { $set: { lastSignedIn: new Date() } });
   const token = await createSessionToken(user.id);
   res.cookie(COOKIE_NAME, token, sessionCookieOptions(req));
+  res.setHeader(SESSION_TOKEN_HEADER, token);
   res.json(sanitizeUser(user as never));
 });
 

@@ -1,8 +1,8 @@
 import { authApi } from "@/lib/api";
 import { Sparkles, LogIn, UserPlus, ShieldCheck, KeyRound, Mail, Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 
 type Mode = "login" | "register" | "forgot" | "reset";
 
@@ -16,7 +16,10 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 export default function Auth() {
-  const [mode, setMode] = useState<Mode>("login");
+  const searchString = useSearch();
+  // Invite links look like /login?ref=CODE — prefill the referral flow.
+  const referralCode = useMemo(() => new URLSearchParams(searchString).get("ref") ?? "", [searchString]);
+  const [mode, setMode] = useState<Mode>(referralCode ? "register" : "login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +35,7 @@ export default function Auth() {
     setSubmitting(true);
     try {
       if (mode === "register") {
-        await authApi.register({ name: name.trim(), email: email.trim(), password });
+        await authApi.register({ name: name.trim(), email: email.trim(), password, referralCode: referralCode || undefined });
         toast.success("Account created.");
         setLocation("/");
       } else if (mode === "login") {
@@ -71,7 +74,7 @@ export default function Auth() {
 
   const copy =
     mode === "login" ? "Log in to continue your placement journey."
-    : mode === "register" ? "Save your skills, resume signal, roadmap, and role matches in one calm workspace."
+    : mode === "register" ? ""
     : mode === "forgot" ? "Enter your account email and we'll send a reset link."
     : "Choose a new password for your account.";
 
@@ -102,7 +105,7 @@ export default function Auth() {
         <div className="auth-card__content">
           <p className="eyebrow eyebrow--green"><span className="status-dot" /> YOUR CAREER WORKSPACE</p>
           <h1>{heading}</h1>
-          <p className="auth-card__copy">{copy}</p>
+          {copy ? <p className="auth-card__copy">{copy}</p> : null}
           <form className="auth-form" onSubmit={handleSubmit}>
             {mode === "register" ? (
               <label>

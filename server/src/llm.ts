@@ -110,6 +110,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${ENV.llmApiKey}` },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(90_000),
   });
 
   if (!response.ok) {
@@ -117,6 +118,65 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
   }
   return (await response.json()) as InvokeResult;
+}
+
+// -----------------------------------------------------------------------------
+// Streaming invoke — OpenAI-compatible SSE ("data: {...}\n\n" chunks).
+// Yields each assistant text delta; the caller accumulates the full reply.
+// -----------------------------------------------------------------------------
+
+export async function* streamLLM(params: InvokeParams): AsyncGenerator<string> {
+  if (!ENV.llmApiKey) throw new Error("OPENAI_API_KEY is not configured");
+
+  const payload: Record<string, unknown> = {
+    model: params.model ?? ENV.llmModel,
+    messages: params.messages.map(normalizeMessage),
+    stream: true,
+  };
+  if (typeof params.max_tokens === "number") payload.max_tokens = params.max_tokens;
+
+  const response = await fetchWithBackoff(`${ENV.llmBaseUrl}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${ENV.llmApiKey}` },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(90_000),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`);
+  }
+  if (!response.body) throw new Error("LLM streaming response has no body");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE events are separated by a blank line; keep the last partial event.
+      const events = buffer.split("\n\n");
+      buffer = events.pop() ?? "";
+      for (const event of events) {
+        for (const line of event.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") return;
+          try {
+            const chunk = JSON.parse(data) as { choices?: { delta?: { content?: string | null } }[] };
+            const delta = chunk.choices?.[0]?.delta?.content;
+            if (typeof delta === "string" && delta.length > 0) yield delta;
+          } catch {
+            // Skip malformed keep-alive/partial chunks.
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -316,7 +376,10 @@ function extractTextFromPdf(buffer: Buffer): string {
   }
 }
 
-async function extractTextFromPdfAsync(buffer: Buffer): Promise<string> {
+// Extracts readable text from an uploaded resume buffer (PDF via pdf-parse,
+// anything else via a best-effort text heuristic). Lets the LLM read resumes
+// without needing a fetchable file URL — works with any provider.
+export async function extractResumeText(buffer: Buffer): Promise<string> {
   try {
     const uint8 = new Uint8Array(buffer);
     const parser = new PDFParse(uint8);
@@ -601,7 +664,7 @@ function extractSummarySection(text: string): string {
 export async function getFallbackResumeExtraction(fileBuffer: Buffer, mimeType: string): Promise<FallbackResumeResult> {
   let text: string;
   if (mimeType === "application/pdf") {
-    text = await extractTextFromPdfAsync(fileBuffer);
+    text = await extractResumeText(fileBuffer);
   } else {
     // For DOC/DOCX, extract whatever readable text we can.
     text = fileBuffer.toString("utf8").replace(/[^\x20-\x7E]/g, " ");

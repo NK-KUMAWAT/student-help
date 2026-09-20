@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedRequest } from "../auth";
 import { ResumeModel, type ResumeDoc } from "../db";
-import { getFallbackResumeExtraction, hasLlmKey, invokeLLM } from "../llm";
-import { storageGetSignedUrl, storagePut } from "../storage";
+import { extractResumeText, getFallbackResumeExtraction, hasLlmKey, invokeLLM } from "../llm";
+import { storagePut } from "../storage";
 
 const router = Router();
 
@@ -65,6 +65,16 @@ const extractSchema = z.object({
   fileBase64: z.string().min(1),
 });
 
+// LLMs sometimes wrap JSON in markdown fences or trail off — strip fences and
+// take the outermost object before parsing.
+function parseJsonObject<T>(text: string): T {
+  const cleaned = text.replace(/```(?:json)?\s*/gi, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end <= start) throw new Error("LLM returned no JSON object");
+  return JSON.parse(cleaned.slice(start, end + 1)) as T;
+}
+
 router.post("/extract-skills", requireAuth, async (req: Request, res: Response) => {
   const parsed = extractSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -83,7 +93,6 @@ router.post("/extract-skills", requireAuth, async (req: Request, res: Response) 
 
   try {
     const { key, url } = await storagePut(`resumes/${String(user._id)}/${fileName}`, fileBuffer, mimeType);
-    const signedUrl = await storageGetSignedUrl(key);
 
     let reviewed: { skills: { name: string; level: number; evidence: string }[]; summary: string; reviewNotes: string; rawText?: string; education?: { institution: string; degree: string; year: string; score: string }[]; experience?: { company: string; role: string; duration: string; description: string }[]; projects?: { title: string; description: string; technologies: string }[]; certifications?: { name: string; issuer: string; date: string }[]; achievements?: string[]; languages?: { name: string; proficiency: string }[]; personalDetails?: { name: string; email: string; phone: string; location: string; links: string[] } };
 
@@ -91,32 +100,44 @@ router.post("/extract-skills", requireAuth, async (req: Request, res: Response) 
       // Fallback extraction — no API key required.
       reviewed = await getFallbackResumeExtraction(fileBuffer, mimeType);
     } else {
-      const response = await invokeLLM({
-        messages: [
-          { role: "system", content: "You are a careful resume parser. Extract only skills clearly supported by the resume. Estimate proficiency from evidence, where 100 means advanced professional experience and 1 means only a passing mention. Return concise evidence." },
-          { role: "user", content: [
-            { type: "text", text: "Analyze this resume and return the student's technical and professional skills." },
-            { type: "file_url", file_url: { url: signedUrl, mime_type: mimeType === "application/pdf" ? "application/pdf" : undefined } },
-          ] },
-        ],
-        response_format: { type: "json_schema", json_schema: { name: "resume_skills", strict: true, schema: extractedSkillsSchema } },
-        max_tokens: 1200,
-      });
+      // Send extracted text instead of a file URL — remote providers cannot
+      // fetch localhost uploads, and Gemini rejects file_url content parts.
+      const resumeText = (await extractResumeText(fileBuffer)).trim();
+      if (resumeText.length < 60) {
+        reviewed = await getFallbackResumeExtraction(fileBuffer, mimeType);
+      } else {
+        try {
+        const response = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are a careful resume parser. Extract only skills clearly supported by the resume. Estimate proficiency from evidence, where 100 means advanced professional experience and 1 means only a passing mention. Return concise evidence." },
+            { role: "user", content: `Analyze this resume and return the student's technical and professional skills.\n\nRESUME TEXT (extracted from the uploaded file "${fileName}"):\n${resumeText.slice(0, 14000)}` },
+          ],
+          response_format: { type: "json_schema", json_schema: { name: "resume_skills", strict: true, schema: extractedSkillsSchema } },
+          max_tokens: 1200,
+        });
 
-      const content = response.choices[0]?.message.content;
-      const parsed = JSON.parse(typeof content === "string" ? content : content.map(part => part.type === "text" ? part.text : "").join(""));
+        const content = response.choices[0]?.message.content;
+        const parsed = parseJsonObject(typeof content === "string" ? content : content.map(part => part.type === "text" ? part.text : "").join(""));
 
-      const review = await invokeLLM({
-        messages: [
-          { role: "system", content: "You are the second resume-review agent. Normalize duplicate skills, correct obvious naming inconsistencies, remove unsupported skills, keep evidence grounded in the supplied extraction, and produce a concise student-friendly review note." },
-          { role: "user", content: `Review this first-agent resume extraction and return the corrected final skill list as JSON:\n${JSON.stringify(parsed)}` },
-        ],
-        response_format: { type: "json_schema", json_schema: { name: "reviewed_resume_skills", strict: true, schema: reviewedSkillsSchema } },
-        max_tokens: 1400,
-      });
+        const review = await invokeLLM({
+          messages: [
+            { role: "system", content: "You are the second resume-review agent. Normalize duplicate skills, correct obvious naming inconsistencies, remove unsupported skills, keep evidence grounded in the supplied extraction, and produce a concise student-friendly review note." },
+            { role: "user", content: `Review this first-agent resume extraction and return the corrected final skill list as JSON:\n${JSON.stringify(parsed)}` },
+          ],
+          response_format: { type: "json_schema", json_schema: { name: "reviewed_resume_skills", strict: true, schema: reviewedSkillsSchema } },
+          max_tokens: 1400,
+        });
 
-      const reviewedContent = review.choices[0]?.message.content;
-      reviewed = JSON.parse(typeof reviewedContent === "string" ? reviewedContent : reviewedContent.map(part => part.type === "text" ? part.text : "").join(""));
+        const reviewedContent = review.choices[0]?.message.content;
+        reviewed = parseJsonObject(typeof reviewedContent === "string" ? reviewedContent : reviewedContent.map(part => part.type === "text" ? part.text : "").join(""));
+        if (!reviewed.rawText) reviewed.rawText = resumeText.slice(0, 20000);
+        } catch (llmError) {
+          // Provider error, rate limit, or malformed JSON — degrade to the
+          // deterministic extractor instead of failing the upload.
+          console.warn("[Resume] LLM extraction failed, using fallback extractor:", llmError);
+          reviewed = await getFallbackResumeExtraction(fileBuffer, mimeType);
+        }
+      }
     }
 
     const resume = await ResumeModel.create({
@@ -127,7 +148,22 @@ router.post("/extract-skills", requireAuth, async (req: Request, res: Response) 
       extractedSkills: JSON.stringify(reviewed),
     });
 
-    res.json({ fileName, url, resumeId: resume.id, ...reviewed });
+    res.json({
+      fileName,
+      url,
+      resumeId: resume.id,
+      skills: reviewed.skills ?? [],
+      summary: reviewed.summary ?? "",
+      reviewNotes: reviewed.reviewNotes ?? "",
+      rawText: reviewed.rawText ?? "",
+      education: reviewed.education ?? [],
+      experience: reviewed.experience ?? [],
+      projects: reviewed.projects ?? [],
+      certifications: reviewed.certifications ?? [],
+      achievements: reviewed.achievements ?? [],
+      languages: reviewed.languages ?? [],
+      personalDetails: reviewed.personalDetails ?? { name: "", email: "", phone: "", location: "", links: [] },
+    });
   } catch (error) {
     console.error("[Resume] Extraction failed:", error);
     res.status(500).json({ error: error instanceof Error ? error.message : "Resume extraction failed" });

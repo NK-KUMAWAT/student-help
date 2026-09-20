@@ -32,7 +32,7 @@ export const queryKeys = {
 
 export const authApi = {
   me: () => api.get<User | null>("/api/auth/me").then(r => r.data),
-  register: (body: { name: string; email: string; password: string }) =>
+  register: (body: { name: string; email: string; password: string; referralCode?: string }) =>
     api.post<User>("/api/auth/register", body).then(r => r.data),
   login: (body: { email: string; password: string }) =>
     api.post<User>("/api/auth/login", body).then(r => r.data),
@@ -81,12 +81,32 @@ export type ExtractedResume = {
   personalDetails: PersonalDetails;
 };
 
+// The API may omit optional arrays (older resumes or partial extractions) —
+// fill defaults so UI code can always read .length safely.
+function normalizeResume(data: ExtractedResume | null): ExtractedResume | null {
+  if (!data) return data;
+  return {
+    ...data,
+    skills: data.skills ?? [],
+    summary: data.summary ?? "",
+    reviewNotes: data.reviewNotes ?? "",
+    rawText: data.rawText ?? "",
+    education: data.education ?? [],
+    experience: data.experience ?? [],
+    projects: data.projects ?? [],
+    certifications: data.certifications ?? [],
+    achievements: data.achievements ?? [],
+    languages: data.languages ?? [],
+    personalDetails: data.personalDetails ?? { name: "", email: "", phone: "", location: "", links: [] },
+  };
+}
+
 export const resumeApi = {
   extractSkills: (body: { fileName: string; mimeType: string; fileBase64: string }) =>
-    api.post<ExtractedResume>("/api/resume/extract-skills", body).then(r => r.data),
+    api.post<ExtractedResume>("/api/resume/extract-skills", body).then(r => normalizeResume(r.data)),
   saveEdits: (body: Partial<ExtractedResume> & { resumeId: string }) =>
     api.put<{ success: boolean }>("/api/resume/save-edits", body).then(r => r.data),
-  latest: () => api.get<ExtractedResume | null>("/api/resume/latest").then(r => r.data),
+  latest: () => api.get<ExtractedResume | null>("/api/resume/latest").then(r => normalizeResume(r.data)),
 };
 
 // -----------------------------------------------------------------------------
@@ -99,6 +119,70 @@ export const supportApi = {
 };
 
 // -----------------------------------------------------------------------------
+// AI Agent (Practice Room)
+// -----------------------------------------------------------------------------
+
+export type AiAgentMessage = { role: "user" | "assistant"; content: string };
+
+export type AiAgentChatResponse = {
+  conversationId: string;
+  message: AiAgentMessage;
+  hasResume: boolean;
+  provider?: "llm" | "fallback";
+};
+
+export type AiAgentStreamEvent =
+  | { type: "meta"; conversationId: string; hasResume: boolean }
+  | { type: "delta"; text: string }
+  | { type: "done"; provider?: "llm" | "fallback" }
+  | { type: "error"; error: string };
+
+export const aiAgentApi = {
+  chat: (body: { message: string; conversationId?: string }) =>
+    api.post<AiAgentChatResponse>("/api/ai-agent/chat", body).then(r => r.data),
+
+  // Server-sent events — yields meta → delta* → done (or error). Uses fetch
+  // instead of axios because axios buffers the whole response body.
+  chatStream: async function* (body: { message: string; conversationId?: string }): AsyncGenerator<AiAgentStreamEvent> {
+    const response = await fetch(`${baseURL}/api/ai-agent/chat`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, stream: true }),
+      signal: AbortSignal.timeout(75_000),
+    });
+    if (!response.ok || !response.body) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      yield { type: "error", error: data?.error ?? `Request failed (${response.status})` };
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const event of events) {
+          const dataLine = event.split("\n").find(line => line.startsWith("data:"));
+          if (!dataLine) continue;
+          try {
+            yield JSON.parse(dataLine.slice(5).trim()) as AiAgentStreamEvent;
+          } catch {
+            // Skip malformed SSE chunks.
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
+};
+
+// -----------------------------------------------------------------------------
 // Referrals
 // -----------------------------------------------------------------------------
 
@@ -107,6 +191,7 @@ export type ReferralsDashboard = {
   withdrawals: WithdrawalRequest[];
   leaderboard: { userId: string; name: string | null; successfulReferrals: number; totalEarned: number }[];
   upiVerification: UpiVerification | null;
+  referralCode: string;
   monthLabel: string;
 };
 

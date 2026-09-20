@@ -1,12 +1,18 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { requireAuth, type AuthedRequest } from "../auth";
-import { ReferralRewardModel, UpiVerificationModel, UserModel, WithdrawalRequestModel, type UpiVerificationDoc } from "../db";
+import { ReferralRewardModel, UpiVerificationModel, UserModel, WithdrawalRequestModel, generateUniqueReferralCode, type UpiVerificationDoc } from "../db";
 
 const router = Router();
 
 router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
   const user = (req as AuthedRequest).user!;
+  // Users registered before referral codes existed get one assigned lazily.
+  let referralCode = user.referralCode;
+  if (!referralCode) {
+    referralCode = await generateUniqueReferralCode(user.name);
+    await UserModel.updateOne({ _id: user._id }, { $set: { referralCode } });
+  }
   const [rewards, withdrawals, leaderboardRaw, upiVerification] = await Promise.all([
     ReferralRewardModel.find({ referrerUserId: user._id }).sort({ createdAt: -1 }).lean(),
     WithdrawalRequestModel.find({ userId: user._id }).sort({ createdAt: -1 }).lean(),
@@ -18,6 +24,7 @@ router.get("/dashboard", requireAuth, async (req: Request, res: Response) => {
     withdrawals,
     leaderboard: leaderboardRaw,
     upiVerification,
+    referralCode,
     monthLabel: new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(new Date()),
   });
 });

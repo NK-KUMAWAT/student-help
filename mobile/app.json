@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Student Care Help",
+    "slug": "student-care-help",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "studentcarehelp",
+    "icon": "./assets/img1.jpeg",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f7f9f6",
+    "splash": {
+      "image": "./assets/img1.jpeg",
+      "resizeMode": "contain",
+      "backgroundColor": "#f7f9f6"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.studentcarehelp.app"
+    },
+    "android": {
+      "package": "com.studentcarehelp.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/img1.jpeg",
+        "backgroundColor": "#f7f9f6"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": []
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-document-picker",
+        { "iCloudContainerEnvironment": "Production" }
+      ]
+    ],
+    "extra": {
+      "apiUrl": ""
+    }
+  }
+}

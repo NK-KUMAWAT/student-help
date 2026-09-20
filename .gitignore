@@ -115,3 +115,6 @@ client/public/__manus__/version.json
 
 # Uploaded files
 uploads/
+
+# Built client output copied into server/ by the root build script
+server/public/

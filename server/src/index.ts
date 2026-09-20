@@ -10,6 +10,7 @@ import authRoutes from "./routes/auth.routes";
 import profileRoutes from "./routes/profile.routes";
 import resumeRoutes from "./routes/resume.routes";
 import supportRoutes from "./routes/support.routes";
+import aiAgentRoutes from "./routes/ai-agent.routes";
 import referralsRoutes from "./routes/referrals.routes";
 import adminRoutes from "./routes/admin.routes";
 import systemRoutes from "./routes/system.routes";
@@ -23,6 +24,10 @@ async function startServer() {
     cors({
       origin: ENV.clientOrigin,
       credentials: true,
+      // Expose the session token header to non-cookie clients (mobile app) and
+      // allow them to send it back via the Authorization header.
+      exposedHeaders: ["x-session-token"],
+      allowedHeaders: ["Content-Type", "Authorization"],
     }),
   );
   app.use(express.json({ limit: "50mb" }));
@@ -39,6 +44,7 @@ async function startServer() {
   app.use("/api/profile", profileRoutes);
   app.use("/api/resume", resumeRoutes);
   app.use("/api/support", supportRoutes);
+  app.use("/api/ai-agent", aiAgentRoutes);
   app.use("/api/referrals", referralsRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/system", systemRoutes);
@@ -46,9 +52,10 @@ async function startServer() {
   // Health check
   app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-  // Serve the built React app in production.
+  // Serve the built React app in production. The root `npm run build` copies
+  // client/dist into server/public; override with STATIC_DIR if needed.
   if (ENV.isProduction) {
-    const distPath = path.resolve(process.cwd(), "dist", "public");
+    const distPath = path.resolve(process.env.STATIC_DIR ?? path.resolve(process.cwd(), "public"));
     app.use(express.static(distPath));
     app.get("*", (_req, res) => res.sendFile(path.resolve(distPath, "index.html")));
   }

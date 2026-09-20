@@ -1,4 +1,4 @@
-import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
+import { COOKIE_NAME, ONE_YEAR_MS } from "../../shared/const";
 import { SignJWT, jwtVerify } from "jose";
 import type { NextFunction, Request, Response } from "express";
 import { ENV } from "./env";
@@ -36,10 +36,21 @@ function getCookie(req: Request, name: string): string | undefined {
   return pair?.slice(name.length + 1);
 }
 
+// Mobile clients (React Native) can't rely on httpOnly cookies, so they send
+// the same session token as `Authorization: Bearer <token>` instead.
+function getBearerToken(req: Request): string | undefined {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith("Bearer ")) return undefined;
+  return header.slice("Bearer ".length).trim() || undefined;
+}
+
+// Response header used to hand the session token to non-browser clients.
+export const SESSION_TOKEN_HEADER = "x-session-token";
+
 // Attach `req.user` when a valid session is present, but never reject the
 // request — use `requireAuth` for protected routes.
 export async function attachUser(req: Request, _res: Response, next: NextFunction) {
-  const token = getCookie(req, COOKIE_NAME);
+  const token = getCookie(req, COOKIE_NAME) ?? getBearerToken(req);
   const session = await verifySessionToken(token);
   if (session) {
     const user = await UserModel.findById(session.userId).lean<UserDoc>();

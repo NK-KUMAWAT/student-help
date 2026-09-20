@@ -1,14 +1,16 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { startLogin } from "@/const";
 import { adminApi, profileApi, queryKeys, referralsApi, resumeApi, supportApi, type ExtractedResume } from "@/lib/api";
+import { buildPracticeRecommendations, type PracticeCategory } from "@/lib/practice";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AIChatBox, type Message } from "@/components/AIChatBox";
+import type { Message } from "@/components/AIChatBox";
 import {
   ArrowUpRight,
   Award,
   BarChart3,
   Bell,
   BookOpen,
+  Bot,
   BriefcaseBusiness,
   Check,
   ChevronRight,
@@ -28,10 +30,12 @@ import {
   Mail,
   MessageCircle,
   Menu,
+  Moon,
   Plus,
   Search,
   ShieldCheck,
   Sparkles,
+  Sun,
   Target,
   Trophy,
   Upload,
@@ -42,8 +46,9 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useTheme } from "../contexts/ThemeContext";
 
 type NavKey = "overview" | "profile" | "roadmap" | "matches" | "practice" | "refer" | "admin";
 
@@ -84,19 +89,29 @@ const initialSkills: Skill[] = [];
 // No hardcoded job data — job matches come from real skill overlap analysis.
 const allSuggestedSkills: Skill[] = [];
 
-const dailyQuotes = [
-  { text: "Small progress is still progress. Keep showing up for your future self.", author: "Student Care Help" },
-  { text: "You do not need to have it all figured out. You only need to take the next useful step.", author: "Student Care Help" },
-  { text: "Your skills grow every time you choose practice over hesitation.", author: "Student Care Help" },
-  { text: "Confidence is built by keeping promises to yourself, one focused session at a time.", author: "Student Care Help" },
-  { text: "The opportunity you want is often waiting behind the habit you have not built yet.", author: "Student Care Help" },
-  { text: "Let today be proof that your direction matters more than your speed.", author: "Student Care Help" },
-  { text: "You are closer than you think. Finish one meaningful thing today.", author: "Student Care Help" },
-];
+// Chat UIs pull in Streamdown (shiki/katex/mermaid) — lazy-load them so the
+// dashboard doesn't pay that cost until a drawer is actually opened.
+const AIChatBox = lazy(() => import("@/components/AIChatBox").then(m => ({ default: m.AIChatBox })));
+const AiAgentDrawer = lazy(() => import("@/components/AiAgentDrawer").then(m => ({ default: m.AiAgentDrawer })));
 
-function getDailyQuote(date: Date) {
-  const dayNumber = Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000);
-  return dailyQuotes[((dayNumber % dailyQuotes.length) + dailyQuotes.length) % dailyQuotes.length];
+const SKILL_TONES: Skill["tone"][] = ["mint", "blue", "amber", "pink"];
+
+const toSkillList = (resume: ExtractedResume): Skill[] =>
+  (resume.skills ?? []).map((skill, index) => ({ name: skill.name, level: skill.level, tone: SKILL_TONES[index % SKILL_TONES.length] }));
+
+// Profile strength is derived ONLY from the latest resume analysis —
+// weighted coverage of the resume sections that were actually detected.
+function computeProfileStrength(resume: ExtractedResume): number {
+  const skills = resume.skills ?? [];
+  const avgLevel = skills.length > 0 ? skills.reduce((sum, s) => sum + s.level, 0) / skills.length : 0;
+  const score =
+    Math.min(30, skills.length * 3) +
+    Math.round((avgLevel / 100) * 20) +
+    Math.min(15, (resume.projects ?? []).length * 5) +
+    Math.min(15, Math.round((resume.experience ?? []).length * 7.5)) +
+    Math.min(10, (resume.education ?? []).length * 5) +
+    Math.min(10, (resume.certifications ?? []).length * 5);
+  return Math.min(100, Math.round(score));
 }
 
 const readFileAsDataUrl = (file: File) =>
@@ -149,6 +164,7 @@ export default function Home() {
   const [jobSearch, setJobSearch] = useState("");
   const [now, setNow] = useState(() => new Date());
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
   const [helpOpen, setHelpOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState<Message[]>([
     { role: "assistant", content: "Hi! I’m your friend. How can I help you?" },
@@ -169,8 +185,7 @@ export default function Home() {
     if (resumeQuery.data) {
       const extracted = resumeQuery.data as ExtractedResume;
       setExtractedResume(extracted);
-      const tones: Skill["tone"][] = ["mint", "blue", "amber", "pink"];
-      setSkills(extracted.skills.map((skill, index) => ({ name: skill.name, level: skill.level, tone: tones[index % tones.length] })));
+      setSkills(toSkillList(extracted));
     }
   }, [resumeQuery.data]);
 
@@ -183,8 +198,7 @@ export default function Home() {
     onSuccess: async (result) => {
       const extracted = result as ExtractedResume;
       setExtractedResume(extracted);
-      const tones: Skill["tone"][] = ["mint", "blue", "amber", "pink"];
-      setSkills(extracted.skills.map((skill, index) => ({ name: skill.name, level: skill.level, tone: tones[index % tones.length] })));
+      setSkills(toSkillList(extracted));
       await queryClient.invalidateQueries({ queryKey: queryKeys.resumeLatest });
       toast.success(`${extracted.skills.length} skills extracted from your resume.`);
       setActiveView("profile");
@@ -224,11 +238,7 @@ export default function Home() {
   const displayName = user?.name || "Student";
   const firstName = displayName.split(" ")[0];
   const timeGreeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 18 ? "Good afternoon" : "Good evening";
-  const dailyQuote = getDailyQuote(now);
-  const profileCompletion = extractedResume ? Math.min(100, 62 + skills.length * 6) : 0;
-  const skillScore = extractedResume && skills.length > 0
-    ? (skills.reduce((sum, s) => sum + s.level, 0) / skills.length / 20).toFixed(1)
-    : "0.0";
+  const profileCompletion = extractedResume ? computeProfileStrength(extractedResume) : 0;
 
   // Compute job matches from actual skills — no hardcoded job data
   const skillNames = useMemo(() => skills.map(s => s.name.toLowerCase()), [skills]);
@@ -248,6 +258,9 @@ export default function Home() {
   const moves = useMemo((): Move[] => {
     if (!extractedResume || skills.length === 0) return [];
     const weakestSkill = [...skills].sort((a, b) => a.level - b.level)[0];
+    // Optional resume sections may be absent — normalize once at the boundary.
+    const projects = extractedResume.projects ?? [];
+    const certifications = extractedResume.certifications ?? [];
     return [
       {
         id: 1,
@@ -258,18 +271,18 @@ export default function Home() {
       },
       {
         id: 2,
-        label: extractedResume.projects.length > 0 ? "Update your project details" : "Add a project to your profile",
-        detail: extractedResume.projects.length > 0
-          ? `You have ${extractedResume.projects.length} project${extractedResume.projects.length > 1 ? "s" : ""} from your resume. Add details to strengthen your profile.`
+        label: projects.length > 0 ? "Update your project details" : "Add a project to your profile",
+        detail: projects.length > 0
+          ? `You have ${projects.length} project${projects.length > 1 ? "s" : ""} from your resume. Add details to strengthen your profile.`
           : "No projects found in your resume. Add a project to prove you can deliver.",
         tag: "45 min",
         icon: FileText,
       },
       {
         id: 3,
-        label: extractedResume.certifications.length > 0 ? "Review your certifications" : "Earn a certification",
-        detail: extractedResume.certifications.length > 0
-          ? `You have ${extractedResume.certifications.length} certification${extractedResume.certifications.length > 1 ? "s" : ""}. Keep them updated on your profile.`
+        label: certifications.length > 0 ? "Review your certifications" : "Earn a certification",
+        detail: certifications.length > 0
+          ? `You have ${certifications.length} certification${certifications.length > 1 ? "s" : ""}. Keep them updated on your profile.`
           : "No certifications found in your resume. Earning one can boost your profile.",
         tag: "35 min",
         icon: Gauge,
@@ -290,14 +303,16 @@ export default function Home() {
       return;
     }
     const notifs: { id: number; title: string; body: string; time: string; read: boolean }[] = [];
+    const education = extractedResume.education ?? [];
+    const projects = extractedResume.projects ?? [];
     if (skills.length > 0) {
       notifs.push({ id: 1, title: "Resume analyzed", body: `${skills.length} skills extracted from your resume.`, time: "Just now", read: false });
     }
-    if (extractedResume.education.length > 0) {
-      notifs.push({ id: 2, title: "Education detected", body: `${extractedResume.education.length} education entries found in your resume.`, time: "Just now", read: false });
+    if (education.length > 0) {
+      notifs.push({ id: 2, title: "Education detected", body: `${education.length} education entries found in your resume.`, time: "Just now", read: false });
     }
-    if (extractedResume.projects.length > 0) {
-      notifs.push({ id: 3, title: "Projects found", body: `${extractedResume.projects.length} project${extractedResume.projects.length > 1 ? "s" : ""} detected in your resume.`, time: "Just now", read: true });
+    if (projects.length > 0) {
+      notifs.push({ id: 3, title: "Projects found", body: `${projects.length} project${projects.length > 1 ? "s" : ""} detected in your resume.`, time: "Just now", read: true });
     }
     setNotifications(notifs);
   }, [extractedResume, skills]);
@@ -440,6 +455,7 @@ export default function Home() {
           <div className="topbar-actions">
             <span className="demo-pill"><span /> Account active</span>
             <span className="live-clock"><Clock3 size={14} /> {now.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} · {now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+            <button className="icon-button" onClick={() => toggleTheme?.()} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
             <button className="icon-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}><Bell size={18} />{notifications.some((notification) => !notification.read) ? <i /> : null}</button>
             <button className="top-avatar" onClick={() => changeView("profile")} aria-label="Open profile">{displayName.charAt(0).toUpperCase()}</button>
             <button className="icon-button" onClick={handleLogout} aria-label="Log out" title="Log out"><LogOut size={17} /></button>
@@ -454,8 +470,6 @@ export default function Home() {
                 <div>
                   <p className="eyebrow eyebrow--green"><span className="status-dot" /> SPRINT 06 · PLACEMENT SEASON</p>
                   <h1>{timeGreeting}, {firstName}<span className="heading-dot">.</span></h1>
-                  <p className="welcome-copy">Your next opportunity is closer than your last commit. Here’s the clearest path forward today.</p>
-                  <div className="daily-quote" aria-label="Daily motivational quote"><Sparkles size={15} /><p>“{dailyQuote.text}” <span>— {dailyQuote.author}</span></p></div>
                 </div>
                 <button className="primary-button" onClick={() => changeView("roadmap")}><Sparkles size={16} /> Continue roadmap <ArrowUpRight size={16} /></button>
               </section>
@@ -473,7 +487,7 @@ export default function Home() {
                   <div className="orbit orbit--one" /><div className="orbit orbit--two" />
                   {extractedResume ? (
                     <>
-                      <div className="hero-ring"><span>{skillScore}</span><small>skill score</small></div>
+                      <div className="hero-ring"><span>{profileCompletion}%</span><small>profile strength</small></div>
                     </>
                   ) : (
                     <div className="hero-ring hero-ring--empty"><span>—</span><small>upload resume</small></div>
@@ -531,15 +545,15 @@ export default function Home() {
             </>
           ) : null}
 
-          {activeView === "profile" ? <ProfileView displayName={displayName} email={user.email || ""} profile={profileDraft} isProfileSaving={profileMutation.isPending} onProfileChange={(field, value) => setProfileDraft((current) => ({ ...current, [field]: value }))} onSaveProfile={handleSaveProfile} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} suggestedSkills={suggestedSkills} /> : null}
+          {activeView === "profile" ? <ProfileView displayName={displayName} email={user.email || ""} profile={profileDraft} isProfileSaving={profileMutation.isPending} onProfileChange={(field, value) => setProfileDraft((current) => ({ ...current, [field]: value }))} onSaveProfile={handleSaveProfile} skills={skills} extraction={extractedResume} isExtracting={extractResumeMutation.isPending} isSaving={saveResumeMutation.isPending} onSaveExtraction={(next) => { setExtractedResume(next); setSkills(toSkillList(next)); saveResumeMutation.mutate({ resumeId: next.resumeId, skills: next.skills, summary: next.summary, reviewNotes: next.reviewNotes }); }} onAddSkill={addSkill} onUpload={() => resumeInputRef.current?.click()} suggestedSkills={suggestedSkills} /> : null}
           {activeView === "roadmap" ? <RoadmapView completedMoves={completedMoves} onToggle={toggleMove} onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} skills={skills} extraction={extractedResume} /> : null}
           {activeView === "matches" ? <MatchesView jobs={filteredJobs} search={jobSearch} onSearch={setJobSearch} onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} skills={skills} extraction={extractedResume} /> : null}
-          {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} /> : null}
+          {activeView === "practice" ? <PracticeView onBack={() => changeView("overview")} hasResume={Boolean(extractedResume)} onUpload={() => resumeInputRef.current?.click()} skills={skills} extraction={extractedResume} /> : null}
           {activeView === "refer" ? <ReferralView onBack={() => changeView("overview")} /> : null}
           {activeView === "admin" && user?.role === "admin" ? <AdminWithdrawalsView onBack={() => changeView("overview")} /> : null}
         </div>
       </main>
-      {helpOpen ? <div className="help-drawer-backdrop" onClick={() => setHelpOpen(false)}><aside className="help-drawer" onClick={(event) => event.stopPropagation()}><div className="help-drawer__header"><div><p className="eyebrow eyebrow--green"><LifeBuoy size={14} /> HELP CENTER</p><strong>Pathfinder Guide</strong><small>Always here for your next step</small></div><button className="help-drawer__close" onClick={() => setHelpOpen(false)} aria-label="Close Help Center"><X size={17} /></button></div><AIChatBox messages={chatMessages} onSendMessage={sendHelpMessage} isLoading={supportChatMutation.isPending} height="430px" className="support-chat" placeholder="Ask about your Pathfinder workspace…" emptyStateMessage="What can I help you with?" /></aside></div> : null}
+      {helpOpen ? <div className="help-drawer-backdrop" onClick={() => setHelpOpen(false)}><aside className="help-drawer" onClick={(event) => event.stopPropagation()}><div className="help-drawer__header"><div><p className="eyebrow eyebrow--green"><LifeBuoy size={14} /> HELP CENTER</p><strong>Pathfinder Guide</strong><small>Always here for your next step</small></div><button className="help-drawer__close" onClick={() => setHelpOpen(false)} aria-label="Close Help Center"><X size={17} /></button></div><Suspense fallback={<div className="admin-empty"><strong>Loading chat…</strong></div>}><AIChatBox messages={chatMessages} onSendMessage={sendHelpMessage} isLoading={supportChatMutation.isPending} height="430px" className="support-chat" placeholder="Ask about your Pathfinder workspace…" emptyStateMessage="What can I help you with?" /></Suspense></aside></div> : null}
     </div>
   );
 }
@@ -565,19 +579,6 @@ function EditableExtraction({ extraction, isSaving, onSave }: { extraction: Extr
   return <div className="edit-review-box"><div className="edit-review-heading"><span className="eyebrow eyebrow--green"><Sparkles size={13} /> SECOND AI REVIEW</span><span>Review and edit before saving</span></div>{draft.skills.map((skill, index) => <div className="edit-skill-row" key={`${skill.name}-${index}`}><input value={skill.name} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) })} /><input type="number" min="1" max="100" value={skill.level} onChange={(event) => setDraft({ ...draft, skills: draft.skills.map((item, itemIndex) => itemIndex === index ? { ...item, level: Number(event.target.value) } : item) })} /><button className="remove-skill" onClick={() => setDraft({ ...draft, skills: draft.skills.filter((_, itemIndex) => itemIndex !== index) })}><X size={13} /></button></div>)}<button className="text-button" onClick={() => setDraft({ ...draft, skills: [...draft.skills, { name: "New skill", level: 50, evidence: "Added by student" }] })}><Plus size={13} /> Add skill</button><button className="dark-button dark-button--small save-review-button" disabled={isSaving} onClick={() => onSave(draft)}>{isSaving ? "Saving…" : "Save reviewed skills"} <Check size={14} /></button></div>;
 }
 
-function LegacyReferralView({ onBack }: { onBack: () => void }) {
-  const referralCode = "AARAV-PATH26";
-  const [copied, setCopied] = useState(false);
-  const inviteLink = `https://pathfinder.app/join/${referralCode}`;
-  const copyLink = async () => {
-    await navigator.clipboard?.writeText(inviteLink);
-    setCopied(true);
-    toast.success("Referral link copied.");
-    window.setTimeout(() => setCopied(false), 2200);
-  };
-  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder and earn rewards when they complete their first career sprint.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy link"}</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> 3 friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹300</strong><small>Available to redeem</small></div><div className="referral-stat"><span>Successful referrals</span><strong>3</strong><small>2 this month</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹100</strong><small>1 friend in progress</small></div></div><div className="referral-grid"><section className="panel referral-steps"><SectionHeading eyebrow="HOW IT WORKS" title="Three steps, one good nudge" /><div className="referral-step"><span>01</span><div><strong>Share your invite</strong><p>Send your personal link to a classmate or friend.</p></div></div><div className="referral-step"><span>02</span><div><strong>They start their sprint</strong><p>Your friend joins and completes their first roadmap sprint.</p></div></div><div className="referral-step"><span>03</span><div><strong>You get rewarded</strong><p>₹100 credit lands in your rewards wallet.</p></div></div></section><section className="panel referral-activity"><SectionHeading eyebrow="RECENT ACTIVITY" title="Your referral circle" action="View wallet" /><div className="referral-person"><div className="avatar avatar--small">RK</div><div><strong>Riya Kapoor</strong><span>Completed first sprint</span></div><b>+₹100</b></div><div className="referral-person"><div className="avatar avatar--small avatar--blue">AS</div><div><strong>Arjun Singh</strong><span>Started a roadmap</span></div><em>Pending</em></div><div className="referral-person"><div className="avatar avatar--small avatar--pink">PM</div><div><strong>Priya Mehta</strong><span>Completed first sprint</span></div><b>+₹100</b></div></section></div></div>;
-}
-
 function AdminWithdrawalsView({ onBack }: { onBack: () => void }) {
   const queryClient = useQueryClient();
   const { data: requests, isLoading, error } = useQuery({ queryKey: queryKeys.adminWithdrawals, queryFn: adminApi.withdrawals });
@@ -594,12 +595,13 @@ function AdminWithdrawalsView({ onBack }: { onBack: () => void }) {
 }
 
 function ReferralView({ onBack }: { onBack: () => void }) {
-  const referralCode = "AARAV-PATH26";
-  const inviteLink = `https://pathfinder.app/join/${referralCode}`;
+  const { user } = useAuth();
   const [withdrawalRequested, setWithdrawalRequested] = useState(false);
   const [copied, setCopied] = useState(false);
   const queryClient = useQueryClient();
   const { data: referralData } = useQuery({ queryKey: queryKeys.referralsDashboard, queryFn: referralsApi.dashboard });
+  const referralCode = referralData?.referralCode ?? "";
+  const inviteLink = referralCode ? `${window.location.origin}/login?ref=${referralCode}` : "";
   const verifyUpi = useMutation({
     mutationFn: referralsApi.verifyUpi,
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: queryKeys.referralsDashboard }); toast.success("UPI ID verified. You can now request a withdrawal."); },
@@ -614,17 +616,25 @@ function ReferralView({ onBack }: { onBack: () => void }) {
   const copyLink = async () => { await navigator.clipboard?.writeText(inviteLink); setCopied(true); toast.success("Referral link copied."); window.setTimeout(() => setCopied(false), 2000); };
   const shareWhatsApp = () => window.open(`https://wa.me/?text=${encodeURIComponent(`Join me on Pathfinder and get your career roadmap: ${inviteLink}`)}`, "_blank", "noopener,noreferrer");
   const shareEmail = () => window.open(`mailto:?subject=${encodeURIComponent("Your Pathfinder career invite")}&body=${encodeURIComponent(`I think Pathfinder can help with your placement prep. Join here: ${inviteLink}`)}`, "_self");
-  const fallbackRewards = [{ id: 1, referredName: "Riya Kapoor", event: "completed sprint", amount: 100, status: "credited", createdAt: "2026-09-08" }, { id: 2, referredName: "Priya Mehta", event: "completed sprint", amount: 100, status: "credited", createdAt: "2026-09-02" }, { id: 3, referredName: "Dev Malhotra", event: "completed sprint", amount: 100, status: "credited", createdAt: "2026-08-18" }];
-  const fallbackLeaderboard = [{ userId: 1, successfulReferrals: 12, totalEarned: 1200 }, { userId: 2, successfulReferrals: 9, totalEarned: 900 }, { userId: 3, successfulReferrals: 7, totalEarned: 700 }];
-  const rewards = referralData?.rewards?.length ? referralData.rewards : fallbackRewards;
-  const leaderboard = referralData?.leaderboard?.length ? referralData.leaderboard : fallbackLeaderboard;
+  const rewards = referralData?.rewards ?? [];
+  const withdrawals = referralData?.withdrawals ?? [];
+  const leaderboard = referralData?.leaderboard ?? [];
   const verifiedUpi = referralData?.upiVerification?.status === "verified" ? referralData.upiVerification : null;
-  const monthLabel = referralData?.monthLabel || "September 2026";
+  const monthLabel = referralData?.monthLabel || "";
   const dateLabel = (value: Date | string | number) => new Date(value).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const creditedTotal = rewards.filter((item) => item.status === "credited").reduce((sum, item) => sum + item.amount, 0);
   const pendingTotal = rewards.filter((item) => item.status === "pending").reduce((sum, item) => sum + item.amount, 0);
-  const historyRows = [...rewards.map((item) => ({ id: `reward-${item.id}`, title: `${item.referredName} ${item.event}`, subtitle: "Referral reward", date: item.createdAt, amount: `+₹${item.amount}`, status: item.status === "credited" ? "Credited" : "Pending" })), ...(referralData?.withdrawals || []).map((item) => ({ id: `withdrawal-${item.id}`, title: "Withdrawal request", subtitle: item.payoutMethod, date: item.createdAt, amount: `−₹${item.amount}`, status: item.status === "paid" ? "Paid" : "Processing" }))];
-  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder, track every reward, and see how your community is growing.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy"}</button></div><div className="share-actions"><button className="share-button share-button--whatsapp" onClick={shareWhatsApp}><MessageCircle size={15} /> Share on WhatsApp</button><button className="share-button share-button--email" onClick={shareEmail}><Mail size={15} /> Share by email</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> {rewards.length} friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹{creditedTotal || 300}</strong><small>₹{Math.max(0, (creditedTotal || 300) - 100)} available to withdraw</small></div><div className="referral-stat"><span>Successful referrals</span><strong>{rewards.filter((item) => item.status === "credited").length || 3}</strong><small>{rewards.length > 2 ? "This month" : "Keep inviting"}</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹{pendingTotal || 100}</strong><small>1 friend in progress</small></div></div><div className="referral-grid referral-grid--wide"><section className="panel reward-history"><SectionHeading eyebrow="REWARD HISTORY" title="Every earning, in one place" action="Export CSV" /><div className="reward-table"><div className="reward-table__head"><span>Activity</span><span>Date</span><span>Amount</span><span>Status</span></div>{historyRows.length ? historyRows.slice(0, 8).map((row) => <div className="reward-row" key={row.id}><div><strong>{row.title}</strong><span>{row.subtitle}</span></div><span>{dateLabel(row.date)}</span><b>{row.amount}</b><em className={row.status === "Credited" || row.status === "Paid" ? "status-positive" : "status-pending"}>{row.status}</em></div>) : <div className="empty-state"><Wallet size={18} /><strong>No reward activity yet</strong><p>Share your link to get started.</p></div>}</div><div className="upi-verification-card"><div><span className="eyebrow eyebrow--green"><ShieldCheck size={13} /> WITHDRAWAL SECURITY</span><strong>{verifiedUpi ? "UPI ID verified" : "Verify your UPI ID first"}</strong><small>{verifiedUpi ? verifiedUpi.upiId : "We verify the ID format before enabling withdrawals."}</small></div>{verifiedUpi ? <span className="upi-verified-pill"><Check size={12} /> Verified</span> : <div className="upi-input-row"><input value={upiInput} onChange={(event) => setUpiInput(event.target.value)} placeholder="name@bank" aria-label="UPI ID" /><button onClick={() => verifyUpi.mutate({ upiId: upiInput })} disabled={!upiInput.trim() || verifyUpi.isPending}>{verifyUpi.isPending ? "Checking…" : "Verify UPI"}</button></div>}</div><button className="withdraw-button" disabled={!verifiedUpi || withdrawalRequested || requestWithdrawal.isPending} onClick={() => requestWithdrawal.mutate({ amount: 200, payoutMethod: verifiedUpi?.upiId || "UPI", upiVerificationId: verifiedUpi!.id })}><Wallet size={15} /> {withdrawalRequested ? "Withdrawal request pending" : requestWithdrawal.isPending ? "Submitting request…" : "Request withdrawal · ₹200"}</button></section><section className="panel leaderboard-panel"><SectionHeading eyebrow="COMMUNITY LEADERBOARD" title={`Top referrers · ${monthLabel}`} action="View all" /><div className="leaderboard-callout"><Trophy size={17} /><span>Invite 2 more friends to reach <strong>Campus Champion</strong></span></div>{leaderboard.slice(0, 3).map((leader, index) => <div className={`leader-row ${index === 0 ? "leader-row--top" : ""}`} key={leader.userId}><span>0{index + 1}</span><div className={`avatar avatar--small ${index === 1 ? "avatar--blue" : index === 2 ? "avatar--pink" : "avatar--gold"}`}>#{leader.userId}</div><div><strong>{(leader as { name?: string }).name || `Referrer #${leader.userId}`}</strong><small>{leader.successfulReferrals} successful referrals</small></div><b>₹{leader.totalEarned}</b></div>)}<div className="leader-row leader-row--you"><span>07</span><div className="avatar avatar--small">AM</div><div><strong>You</strong><small>{rewards.filter((item) => item.status === "credited").length || 3} successful referrals</small></div><b>₹{creditedTotal || 300}</b></div></section></div></div>;
+  const creditedCount = rewards.filter((item) => item.status === "credited").length;
+  const pendingCount = rewards.filter((item) => item.status === "pending").length;
+  const withdrawnTotal = withdrawals.filter((item) => item.status !== "rejected").reduce((sum, item) => sum + item.amount, 0);
+  const availableBalance = Math.max(0, creditedTotal - withdrawnTotal);
+  const myRank = leaderboard.findIndex((leader) => leader.userId === user?.id);
+  const myInitials = (user?.name || "You").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  const leaderboardCallout = leaderboard.length
+    ? `Invite ${Math.max(1, (leaderboard[0]?.successfulReferrals ?? 0) - creditedCount + 1)} more friends to reach #1`
+    : "Be the first to earn rewards this month";
+  const historyRows = [...rewards.map((item) => ({ id: `reward-${item.id}`, title: `${item.referredName} ${item.event}`, subtitle: "Referral reward", date: item.createdAt, amount: `+₹${item.amount}`, status: item.status === "credited" ? "Credited" : "Pending" })), ...withdrawals.map((item) => ({ id: `withdrawal-${item.id}`, title: "Withdrawal request", subtitle: item.payoutMethod, date: item.createdAt, amount: `−₹${item.amount}`, status: item.status === "paid" ? "Paid" : "Processing" }))];
+  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><UsersRound size={14} /> COMMUNITY GROWTH</p><h1>Help a friend find their path.</h1><p>Invite classmates to Pathfinder, track every reward, and see how your community is growing.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><section className="referral-hero"><div><span className="eyebrow">REFER & EARN</span><h2>₹100 for every friend<br />who gets interview-ready.</h2><p>Your friend gets a 14-day Pro pass. You earn wallet credit after their first completed sprint.</p><div className="invite-link"><span>{inviteLink}</span><button onClick={copyLink}><Copy size={14} /> {copied ? "Copied" : "Copy"}</button></div><div className="share-actions"><button className="share-button share-button--whatsapp" onClick={shareWhatsApp}><MessageCircle size={15} /> Share on WhatsApp</button><button className="share-button share-button--email" onClick={shareEmail}><Mail size={15} /> Share by email</button></div></div><div className="referral-hero-art"><div className="referral-orbit referral-orbit--one" /><div className="referral-orbit referral-orbit--two" /><div className="referral-coin">₹</div><div className="referral-float referral-float--top">+₹100</div><div className="referral-float referral-float--bottom"><UsersRound size={14} /> {rewards.length} friends</div></div></section><div className="referral-stats"><div className="referral-stat"><span>Total earned</span><strong>₹{creditedTotal}</strong><small>₹{availableBalance} available to withdraw</small></div><div className="referral-stat"><span>Successful referrals</span><strong>{creditedCount}</strong><small>{creditedCount === 1 ? "friend joined" : "friends joined"}</small></div><div className="referral-stat"><span>Pending rewards</span><strong>₹{pendingTotal}</strong><small>{pendingCount === 1 ? "1 friend in progress" : `${pendingCount} friends in progress`}</small></div></div><div className="referral-grid referral-grid--wide"><section className="panel reward-history"><SectionHeading eyebrow="REWARD HISTORY" title="Every earning, in one place" action="Export CSV" /><div className="reward-table"><div className="reward-table__head"><span>Activity</span><span>Date</span><span>Amount</span><span>Status</span></div>{historyRows.length ? historyRows.slice(0, 8).map((row) => <div className="reward-row" key={row.id}><div><strong>{row.title}</strong><span>{row.subtitle}</span></div><span>{dateLabel(row.date)}</span><b>{row.amount}</b><em className={row.status === "Credited" || row.status === "Paid" ? "status-positive" : "status-pending"}>{row.status}</em></div>) : <div className="empty-state"><Wallet size={18} /><strong>No reward activity yet</strong><p>Share your link to get started.</p></div>}</div><div className="upi-verification-card"><div><span className="eyebrow eyebrow--green"><ShieldCheck size={13} /> WITHDRAWAL SECURITY</span><strong>{verifiedUpi ? "UPI ID verified" : "Verify your UPI ID first"}</strong><small>{verifiedUpi ? verifiedUpi.upiId : "We verify the ID format before enabling withdrawals."}</small></div>{verifiedUpi ? <span className="upi-verified-pill"><Check size={12} /> Verified</span> : <div className="upi-input-row"><input value={upiInput} onChange={(event) => setUpiInput(event.target.value)} placeholder="name@bank" aria-label="UPI ID" /><button onClick={() => verifyUpi.mutate({ upiId: upiInput })} disabled={!upiInput.trim() || verifyUpi.isPending}>{verifyUpi.isPending ? "Checking…" : "Verify UPI"}</button></div>}</div><button className="withdraw-button" disabled={!verifiedUpi || withdrawalRequested || requestWithdrawal.isPending} onClick={() => requestWithdrawal.mutate({ amount: 200, payoutMethod: verifiedUpi?.upiId || "UPI", upiVerificationId: verifiedUpi!.id })}><Wallet size={15} /> {withdrawalRequested ? "Withdrawal request pending" : requestWithdrawal.isPending ? "Submitting request…" : "Request withdrawal · ₹200"}</button></section><section className="panel leaderboard-panel"><SectionHeading eyebrow="COMMUNITY LEADERBOARD" title={`Top referrers · ${monthLabel}`} action="View all" /><div className="leaderboard-callout"><Trophy size={17} /><span>{leaderboardCallout}</span></div>{leaderboard.length === 0 ? <div className="empty-state"><Trophy size={18} /><strong>No referrers yet</strong><p>Rewards will appear here as friends join through invite links.</p></div> : null}{leaderboard.slice(0, 3).map((leader, index) => <div className={`leader-row ${index === 0 ? "leader-row--top" : ""}`} key={leader.userId}><span>{String(index + 1).padStart(2, "0")}</span><div className={`avatar avatar--small ${index === 1 ? "avatar--blue" : index === 2 ? "avatar--pink" : "avatar--gold"}`}>{(leader.name || "S").split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</div><div><strong>{leader.name || "Student"}</strong><small>{leader.successfulReferrals} successful referrals</small></div><b>₹{leader.totalEarned}</b></div>)}<div className="leader-row leader-row--you"><span>{myRank >= 0 ? String(myRank + 1).padStart(2, "0") : "—"}</span><div className="avatar avatar--small">{myInitials}</div><div><strong>You</strong><small>{creditedCount} successful referrals</small></div><b>₹{creditedTotal}</b></div></section></div></div>;
 }
 function RoadmapView({ completedMoves, onToggle, onBack, hasResume, onUpload, skills, extraction }: { completedMoves: number[]; onToggle: (id: number) => void; onBack: () => void; hasResume: boolean; onUpload: () => void; skills: Skill[]; extraction: ExtractedResume | null }) {
   if (!hasResume || !extraction) {
@@ -648,9 +658,25 @@ function MatchesView({ jobs, search, onSearch, onBack, hasResume, onUpload, skil
   return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><BriefcaseBusiness size={14} /> JOB MATCHES</p><h1>Roles that fit your signal.</h1><p>Based on {skills.length} skills extracted from your resume.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="match-toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search your skills" /></div><span>{skills.length} skills from resume</span></div><div className="job-list">{skills.length ? skills.filter((skill) => skill.name.toLowerCase().includes(search.toLowerCase())).map((skill) => <div className="job-card" key={skill.name}><div className="company-logo">{skill.name.charAt(0)}</div><div className="job-card__copy"><span>{skill.name}</span><h3>{skill.level >= 70 ? "Advanced" : skill.level >= 50 ? "Intermediate" : "Beginner"}</h3><p>Proficiency: {skill.level}%</p></div><div className="match-score"><strong>{skill.level}%</strong><span>level</span></div><button className="dark-button dark-button--small" onClick={() => toast.success(`${skill.name} shortlisted for practice.`)}>Practice <Plus size={15} /></button></div>) : <div className="empty-state"><Search size={20} /><strong>No skills found</strong><p>Upload a resume to extract your skills.</p></div>}</div></div>;
 }
 
-function PracticeView({ onBack, hasResume, onUpload }: { onBack: () => void; hasResume: boolean; onUpload: () => void }) {
-  if (!hasResume) {
-    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-empty locked-state"><Code2 size={28} /><strong>Upload your resume to unlock practice drills</strong><p>Practice drills are tailored to your current skill levels. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div></div>;
+const practiceCategoryIcon: Record<PracticeCategory, { icon: LucideIcon; modifier: string }> = {
+  "Coding Practice": { icon: Code2, modifier: "" },
+  "Technical Questions": { icon: BookOpen, modifier: " practice-icon--blue" },
+  "Interview Questions": { icon: GraduationCap, modifier: " practice-icon--pink" },
+  "Aptitude / Problem Solving": { icon: BarChart3, modifier: " practice-icon--blue" },
+  "Resume-based Questions": { icon: FileText, modifier: " practice-icon--pink" },
+};
+
+function PracticeView({ onBack, hasResume, onUpload, skills, extraction }: { onBack: () => void; hasResume: boolean; onUpload: () => void; skills: Skill[]; extraction: ExtractedResume | null }) {
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentPrompt, setAgentPrompt] = useState<string | null>(null);
+  // Keep the lazily-loaded drawer mounted after first open so chat state survives close/reopen.
+  const [agentMounted, setAgentMounted] = useState(false);
+  const openAgent = (prompt: string | null = null) => { setAgentPrompt(prompt); setAgentMounted(true); setAgentOpen(true); };
+  const agentCard = <section className="panel ai-agent-card"><div className="ai-agent-card__icon"><Bot size={20} /></div><div className="ai-agent-card__copy"><strong>Nk</strong><p>Personalized career &amp; interview assistant, grounded in your resume.</p></div><button className="dark-button" onClick={() => openAgent()}><Bot size={15} /> Nk</button></section>;
+  const agentDrawer = agentMounted ? <Suspense fallback={null}><AiAgentDrawer open={agentOpen} onClose={() => setAgentOpen(false)} hasResume={hasResume} onUpload={onUpload} initialPrompt={agentPrompt} /></Suspense> : null;
+  if (!hasResume || !extraction) {
+    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div>{agentCard}<div className="admin-empty locked-state"><Code2 size={28} /><strong>Upload your resume to unlock practice drills</strong><p>Practice drills are tailored to your current skill levels. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div>{agentDrawer}</div>;
   }
-  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="practice-grid"><div className="practice-card practice-card--featured"><div className="practice-card__top"><span className="practice-label">RECOMMENDED</span><div className="practice-icon"><Code2 size={18} /></div></div><h2>React component screen</h2><p>Build a filterable user list with accessible states and clean component boundaries.</p><div className="practice-meta"><span><BookOpen size={14} /> 8 prompts</span><span><Flame size={14} /> 35 min</span></div><button className="dark-button" onClick={() => toast.success("Practice room opened. Timer ready in the next build.")}>Start practice <ChevronRight size={16} /></button></div><div className="practice-card"><div className="practice-card__top"><span className="practice-label practice-label--muted">WARM UP</span><div className="practice-icon practice-icon--blue"><BarChart3 size={18} /></div></div><h2>SQL for product analytics</h2><p>Translate a product question into a query and explain the tradeoffs.</p><div className="practice-meta"><span><BookOpen size={14} /> 6 prompts</span><span><Flame size={14} /> 20 min</span></div><button className="quiet-button quiet-button--border" onClick={() => toast.info("SQL warm-up will open in the next build.")}>View drill <ChevronRight size={16} /></button></div><div className="practice-card"><div className="practice-card__top"><span className="practice-label practice-label--muted">FOUNDATIONS</span><div className="practice-icon practice-icon--pink"><GraduationCap size={18} /></div></div><h2>Tell your project story</h2><p>Turn your strongest project into a clear two-minute interview narrative.</p><div className="practice-meta"><span><BookOpen size={14} /> 5 prompts</span><span><Flame size={14} /> 15 min</span></div><button className="quiet-button quiet-button--border" onClick={() => toast.info("Story coach will open in the next build.")}>View drill <ChevronRight size={16} /></button></div></div></div>;
+  const recommendations = buildPracticeRecommendations(extraction, skills);
+  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills built from your resume analysis — weakest skills first.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div>{agentCard}<div className="practice-section"><SectionHeading eyebrow="RECOMMENDED" title="Drills matched to your resume analysis" /><div className="practice-grid">{recommendations.map((rec, index) => { const { icon: RecIcon, modifier } = practiceCategoryIcon[rec.category]; return <div className={`practice-card${index === 0 ? " practice-card--featured" : ""}`} key={rec.id}><div className="practice-card__top"><span className={`practice-label${index === 0 ? "" : " practice-label--muted"}`}>{rec.category.toUpperCase()}{index === 0 ? " · TOP PICK" : ""}</span><div className={`practice-icon${modifier}`}><RecIcon size={18} /></div></div><h2>{rec.title}</h2><p>{rec.description}</p><span className="practice-skill"><Target size={11} /> {rec.skill}{rec.improvement ? " · focus area" : ""}</span><div className="practice-meta"><span><BookOpen size={14} /> {rec.questions}</span><span><Gauge size={14} /> {rec.difficulty}</span><span><Flame size={14} /> {rec.minutes} min</span></div><button className={index === 0 ? "dark-button" : "quiet-button quiet-button--border"} onClick={() => openAgent(`Start a "${rec.title}" practice session — quiz me on ${rec.skill} (${rec.category}, ${rec.difficulty} level).`)}>Start practice <ChevronRight size={16} /></button></div>; })}</div></div>{agentDrawer}</div>;
 }

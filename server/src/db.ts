@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import mongoose from "mongoose";
 import { ENV } from "./env";
 
@@ -53,6 +54,8 @@ const userSchema = new Schema(
     lastSignedIn: { type: Date, default: () => new Date() },
     passwordResetToken: { type: String, default: null },
     passwordResetExpires: { type: Date, default: null },
+    referralCode: { type: String, unique: true, sparse: true, index: true },
+    referredByUserId: { type: Schema.Types.ObjectId, ref: "User", default: null },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
@@ -100,6 +103,23 @@ const withdrawalRequestSchema = new Schema(
   { timestamps: { createdAt: true, updatedAt: false }, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 );
 
+const aiConversationMessageSchema = new Schema(
+  {
+    role: { type: String, enum: ["user", "assistant"], required: true },
+    content: { type: String, required: true },
+    createdAt: { type: Date, default: () => new Date() },
+  },
+  { _id: false },
+);
+
+const aiConversationSchema = new Schema(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    messages: { type: [aiConversationMessageSchema], default: [] },
+  },
+  { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
+);
+
 // Mongoose exposes an `id` virtual (string of _id) by default; ensure it shows
 // up in JSON responses so the API returns `id` alongside `_id`.
 userSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
@@ -107,6 +127,7 @@ resumeSchema.virtual("id").get(function () { return (this._id as mongoose.Types.
 referralRewardSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 upiVerificationSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 withdrawalRequestSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
+aiConversationSchema.virtual("id").get(function () { return (this._id as mongoose.Types.ObjectId).toString(); });
 
 // -----------------------------------------------------------------------------
 // Models
@@ -117,6 +138,7 @@ export const ResumeModel = models.Resume ?? model("Resume", resumeSchema);
 export const ReferralRewardModel = models.ReferralReward ?? model("ReferralReward", referralRewardSchema);
 export const UpiVerificationModel = models.UpiVerification ?? model("UpiVerification", upiVerificationSchema);
 export const WithdrawalRequestModel = models.WithdrawalRequest ?? model("WithdrawalRequest", withdrawalRequestSchema);
+export const AiConversationModel = models.AiConversation ?? model("AiConversation", aiConversationSchema);
 
 // -----------------------------------------------------------------------------
 // Types (mirror the shape the frontend expects)
@@ -127,6 +149,7 @@ export type ResumeDoc = InferSchemaType<typeof resumeSchema> & { id: string; _id
 export type ReferralRewardDoc = InferSchemaType<typeof referralRewardSchema> & { id: string };
 export type UpiVerificationDoc = InferSchemaType<typeof upiVerificationSchema> & { id: string; _id: import("mongoose").Types.ObjectId };
 export type WithdrawalRequestDoc = InferSchemaType<typeof withdrawalRequestSchema> & { id: string };
+export type AiConversationDoc = InferSchemaType<typeof aiConversationSchema> & { id: string; _id: mongoose.Types.ObjectId };
 
 // Strip the passwordHash and mongoose internals for API responses.
 // Handles both full Mongoose documents (have toObject) and lean/plain objects.
@@ -151,4 +174,14 @@ export function sanitizeUser(user: unknown): Record<string, unknown> {
     obj.id = String(obj._id);
   }
   return obj;
+}
+
+// Generate a unique, human-readable referral code like "AARAV-9K3F2C".
+export async function generateUniqueReferralCode(name: string | null | undefined): Promise<string> {
+  const slug = (name ?? "").trim().split(/\s+/)[0]?.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 8) || "USER";
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const candidate = `${slug}-${randomBytes(3).toString("hex").toUpperCase()}`;
+    if (!(await UserModel.exists({ referralCode: candidate }))) return candidate;
+  }
+  return `${slug}-${randomBytes(6).toString("hex").toUpperCase()}`;
 }

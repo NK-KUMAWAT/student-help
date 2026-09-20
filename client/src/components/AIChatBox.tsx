@@ -33,6 +33,11 @@ export type AIChatBoxProps = {
   isLoading?: boolean;
 
   /**
+   * Optional label shown next to the loading spinner (e.g. "Nk is thinking…")
+   */
+  loadingText?: string;
+
+  /**
    * Placeholder text for the input field
    */
   placeholder?: string;
@@ -114,6 +119,7 @@ export function AIChatBox({
   messages,
   onSendMessage,
   isLoading = false,
+  loadingText,
   placeholder = "Type your message...",
   className,
   height = "600px",
@@ -292,8 +298,11 @@ export function AIChatBox({
                   <div className="size-8 shrink-0 mt-1 rounded-full bg-primary/10 flex items-center justify-center">
                     <Sparkles className="size-4 text-primary" />
                   </div>
-                  <div className="rounded-lg bg-muted px-4 py-2.5">
+                  <div className="rounded-lg bg-muted px-4 py-2.5 flex items-center gap-2">
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    {loadingText ? (
+                      <span className="text-xs text-muted-foreground">{loadingText}</span>
+                    ) : null}
                   </div>
                 </div>
               )}
