@@ -95,7 +95,10 @@ function buildSystemPrompt(user: UserDoc, resume: ResumeContext | null): string 
     : "RESUME CONTEXT: none — the student has not uploaded a resume yet. Do not mention the resume unless the student asks about it.";
 
   return [
-    "You are Nk — a personalized career, learning, coding and interview assistant inside the AI Placement Compass Practice Room.",
+    "You are Nk — a general-purpose AI assistant and tutor inside the AI Placement Compass Practice Room, with extra skill in career guidance, coding and interviews.",
+    "- Always answer the student's current question directly and accurately. Never replace the answer with a description of your capabilities.",
+    "- Do not mention the student's resume unless the request is about their resume/profile or the resume is genuinely necessary to answer.",
+    "- Follow-up questions (\"its advantages\", \"give an example\", \"make it harder\") must be resolved using the relevant conversation context.",
     "",
     "WHAT YOU HELP WITH:",
     "- General questions and normal conversation — answer like a modern AI assistant.",
@@ -194,6 +197,37 @@ const TOPICS: Topic[] = [
     question: "What is the difference between state and props in React?",
   },
   {
+    match: /\b(?:sql\s+)?(?:(?:inner|left|right|full|outer|cross)\s+)?joins?\b/i,
+    name: "SQL JOIN",
+    definition: "**A JOIN** combines rows from two tables based on a related column.\n\n**The main types:**\n- **INNER JOIN** — only rows that match in both tables\n- **LEFT JOIN** — all rows from the left table, `NULL` where no match\n- **RIGHT JOIN** — all rows from the right table\n- **FULL OUTER JOIN** — all rows from both sides",
+    example: "```sql\nSELECT s.name, c.course\nFROM students s\nINNER JOIN courses c ON s.id = c.student_id;\n```\nReturns each student with their course — only where the `id` matches `student_id` in both tables.",
+    advantages: "**Why joins matter:**\n- Relational data is split across tables on purpose (normalization) — JOINs reassemble it\n- INNER vs LEFT is the single most-asked SQL interview question\n- A missing join condition produces a cartesian product — a classic bug",
+    question: "What is the difference between INNER JOIN and LEFT JOIN?",
+  },
+  {
+    match: /\bbinary search\b/i,
+    name: "Binary Search",
+    definition: "**Binary search** finds a target in a **sorted** array by repeatedly halving the search range.\n\n**How it works:**\n1. Check the middle element\n2. If it's the target — done\n3. If the target is smaller — discard the right half; if larger — discard the left half\n4. Repeat until found or the range is empty",
+    example: "```python\ndef binary_search(arr, target):\n    lo, hi = 0, len(arr) - 1\n    while lo <= hi:\n        mid = (lo + hi) // 2\n        if arr[mid] == target:\n            return mid\n        elif arr[mid] < target:\n            lo = mid + 1\n        else:\n            hi = mid - 1\n    return -1\n```",
+    advantages: "**Why binary search is faster:**\n- Linear search checks elements one by one → **O(n)**\n- Binary search halves the range every step → **O(log n)**\n- For 1,000,000 elements: ~20 checks vs up to 1,000,000\n- The catch: data must be sorted first",
+    question: "Why does binary search require a sorted array, and what is its time complexity?",
+  },
+  {
+    match: /\brecursion|recursive\b/i,
+    name: "Recursion",
+    definition: "**Recursion** is when a function calls itself to solve a smaller version of the same problem.\n\n**Two required parts:**\n- **Base case** — the condition that stops the calls (without it → infinite recursion / stack overflow)\n- **Recursive case** — the function calls itself on a smaller input",
+    example: "```python\ndef factorial(n):\n    if n <= 1:        # base case\n        return 1\n    return n * factorial(n - 1)   # recursive case\n\nfactorial(5)  # 5 * 4 * 3 * 2 * 1 = 120\n```",
+    advantages: "**When recursion helps:**\n- Problems that decompose naturally: trees, graphs, divide-and-conquer\n- Often cleaner than loops (DFS, quicksort, traversals)\n- Trade-off: uses call-stack memory; deep recursion can overflow",
+    question: "What happens if a recursive function has no base case?",
+  },
+  {
+    match: /\balgorithm(s)?\b|\bbig\s*o\b|time complexity/i,
+    name: "Algorithm",
+    definition: "**An algorithm** is a precise, step-by-step procedure for solving a problem — the logic behind the code.\n\n**How we measure them:**\n- **Big O notation** describes how cost grows with input size\n- `O(1)` constant, `O(log n)` logarithmic, `O(n)` linear, `O(n²)` quadratic\n- Faster growth class = worse scaling",
+    example: "```\nLinear search:  O(n)   — check every element\nBinary search:  O(log n) — halve the range each step\nBubble sort:    O(n²)  — nested loops over the array\n```",
+    question: "What is the difference between O(n) and O(log n)?",
+  },
+  {
     match: /\bsql\b|structured query/i,
     name: "SQL",
     definition: "**SQL (Structured Query Language)** is the standard language for working with relational databases — querying, inserting, updating, and defining data.\n\n**Key features:**\n- Declarative — you describe WHAT you want, not how to get it\n- Works across MySQL, PostgreSQL, SQLite, SQL Server\n- Core operations: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `JOIN`",
@@ -287,6 +321,7 @@ const TOPICS: Topic[] = [
     match: /\bdata structure(s)?\b|\bdsa\b/i,
     name: "Data Structures",
     definition: "**Data structures** are ways of organizing data so operations (search, insert, delete) are efficient — the foundation of algorithms.\n\n**The core set:**\n- **Arrays/strings** — ordered lists\n- **Hash maps** — O(1) lookup by key\n- **Stacks/queues** — LIFO/FIFO ordering\n- **Linked lists, trees, graphs** — relationships and hierarchies",
+    example: "```python\n# Hash map — O(1) lookup by key\nscores = {\"alice\": 90, \"bob\": 82}\nprint(scores[\"alice\"])  # 90\n\n# Stack — last in, first out\nstack = [1, 2, 3]\nstack.pop()  # removes 3\n\n# Queue — first in, first out\nfrom collections import deque\nqueue = deque([1, 2, 3])\nqueue.popleft()  # removes 1\n```",
     advantages: "**Why they're interview-critical:**\n- Most coding interviews test picking the right structure\n- They determine whether a solution is O(n) or O(n²)",
     question: "When would you use a hash map instead of an array?",
   },
@@ -305,7 +340,7 @@ function findTopic(text: string): Topic | undefined {
 
 // Vague follow-ups ("its advantages", "why is it important", "give me an
 // example") resolve their subject from the recent conversation.
-const VAGUE_FOLLOW_UP = /^(its?|it'?s|this|that|them|they|those|and|so|ok|okay|now|then|also|what about|how about|why|how|give me|show me|tell me|another|more|easier|harder|advantages?|disadvantages?|benefits?|pros|cons|uses?|applications?|examples?|explain|importance|difference|vs)/i;
+const VAGUE_FOLLOW_UP = /^(its?|it'?s|this|that|them|they|those|and|so|ok|okay|now|then|also|what|how|why|where|when|which|who|can you|could you|do|does|is|are|give me|show me|tell me|another|more|easier|harder|advantages?|disadvantages?|benefits?|pros|cons|uses?|applications?|examples?|explain|importance|difference|vs)/i;
 const ADVANTAGE_INTENT = /advantage|benefit|pros\b|why (is|are|use|learn)|why use|important|popular|useful|good for/i;
 const EXAMPLE_INTENT = /example|show me|demo|sample|snippet|in code/i;
 const QUESTION_INTENT = /question|another|next|harder|easier|more difficult|increase/i;
@@ -474,7 +509,33 @@ function buildFallbackReply(
     if (/explain\s+(this|the)\s+code/i.test(lower)) {
       return "Paste the code you want explained and I'll walk through it line by line — what it does, how it works, and any common mistakes to watch for.";
     }
-    return "I can write small examples for you — try \"write a Java hello world\", \"write a function to reverse a string\", or name the concept you want coded and I'll show an example.";
+    // "write a python program" / "write some Java code" — give that topic's
+    // example and offer to write a fuller version.
+    const codeTopic = findTopic(lower);
+    if (codeTopic?.example) {
+      return `Here's a small **${codeTopic.name}** program:\n\n${codeTopic.example}\n\nTell me what you want the program to do — input, output, logic — and I'll write a fuller version.`;
+    }
+    return "Tell me what the program should do — e.g. \"write a Java hello world\", \"write a function to reverse a string\", \"write a Python program that sorts a list\" — and I'll write it with an explanation.";
+  }
+
+  // --- Comparisons ("java vs python", "difference between X and Y") -----------------
+  const cmp =
+    lower.match(/\b([a-z0-9+#.]{2,20})\s+(?:vs\.?|versus)\s+([a-z0-9+#.]{2,20})\b/i)
+    ?? lower.match(/difference between\s+([a-z0-9+#.]{2,25}?)\s+and\s+([a-z0-9+#.]{2,25})/i);
+  if (cmp) {
+    const a = findTopic(cmp[1]);
+    const b = findTopic(cmp[2]);
+    if (a && b && a !== b) {
+      const firstLine = (t: Topic) => t.definition.split("\n")[0];
+      return [
+        `**${a.name} vs ${b.name}**`,
+        "",
+        `- ${firstLine(a)}`,
+        `- ${firstLine(b)}`,
+        "",
+        `**In short:** pick **${a.name}** when its strengths fit your goal, **${b.name}** when its strengths do. Ask \"what are the advantages of ${a.name}\" or \"...of ${b.name}\" for a deeper breakdown.`,
+      ].join("\n");
+    }
   }
 
   // --- Direct topic questions ("what is Java", "explain React") ---------------------

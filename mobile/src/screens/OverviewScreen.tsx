@@ -1,6 +1,5 @@
 import {
   ArrowUpRight,
-  BarChart3,
   BriefcaseBusiness,
   Check,
   ChevronRight,
@@ -23,7 +22,7 @@ import type { RootStackParamList } from "../navigation/types";
 import { AppHeader } from "../components/AppHeader";
 import { ProgressRing } from "../components/ProgressRing";
 import { SkillRow } from "../components/SkillRow";
-import { AppButton, EmptyState, Eyebrow, Panel, Screen, SectionHeading } from "../components/ui";
+import { AppButton, EmptyState, Panel, Screen, SectionHeading } from "../components/ui";
 import { colors, radius, spacing } from "../theme";
 
 type Move = { id: number; label: string; detail: string; tag: string; icon: React.ComponentType<{ size?: number; color?: string }> };
@@ -106,9 +105,6 @@ export default function OverviewScreen() {
       <AppHeader title="Overview" />
 
       {/* Welcome */}
-      <Eyebrow green>
-        <Text style={styles.eyebrowInline}>● </Text>SPRINT 06 · PLACEMENT SEASON
-      </Eyebrow>
       <Text style={styles.h1}>
         {timeGreeting}, {firstName}
         <Text style={{ color: colors.orange }}>.</Text>
@@ -311,11 +307,6 @@ export default function OverviewScreen() {
             onPress={() => navigation.navigate("Practice")}
           />
           <QuickAction
-            icon={<BarChart3 size={18} color={colors.blue} />}
-            label="Job matches"
-            onPress={() => navigation.navigate("Main", { screen: "Matches" })}
-          />
-          <QuickAction
             icon={<Target size={18} color={colors.pink} />}
             label="Skill roadmap"
             onPress={() => navigation.navigate("Main", { screen: "Roadmap" })}
@@ -358,7 +349,6 @@ function QuickAction({ icon, label, onPress }: { icon: React.ReactNode; label: s
 
 const styles = StyleSheet.create({
   content: { paddingTop: spacing.md },
-  eyebrowInline: { color: "#4aa47c" },
   h1: { fontSize: 28, fontWeight: "800", color: colors.heading, letterSpacing: -1, marginBottom: 8 },
   dateRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
   dateText: { fontSize: 11, color: colors.textMuted, fontWeight: "600" },

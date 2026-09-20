@@ -1,11 +1,9 @@
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import {
-  BriefcaseBusiness,
   LayoutDashboard,
   Target,
   UserRound,
-  UsersRound,
 } from "lucide-react-native";
 import React from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
@@ -14,12 +12,10 @@ import { useAuth } from "../hooks/useAuth";
 import AdminWithdrawalsScreen from "../screens/AdminWithdrawalsScreen";
 import AuthScreen from "../screens/AuthScreen";
 import HelpCenterScreen from "../screens/HelpCenterScreen";
-import MatchesScreen from "../screens/MatchesScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
 import OverviewScreen from "../screens/OverviewScreen";
 import PracticeScreen from "../screens/PracticeScreen";
 import ProfileScreen from "../screens/ProfileScreen";
-import ReferScreen from "../screens/ReferScreen";
 import RoadmapScreen from "../screens/RoadmapScreen";
 import { colors } from "../theme";
 import type { RootStackParamList, TabParamList } from "./types";
@@ -30,16 +26,12 @@ const Tabs = createBottomTabNavigator<TabParamList>();
 const TAB_ICONS: Record<keyof TabParamList, React.ComponentType<{ size?: number; color?: string }>> = {
   Overview: LayoutDashboard,
   Roadmap: Target,
-  Matches: BriefcaseBusiness,
-  Refer: UsersRound,
   Profile: UserRound,
 };
 
 const TAB_LABELS: Record<keyof TabParamList, string> = {
   Overview: "Overview",
   Roadmap: "Roadmap",
-  Matches: "Matches",
-  Refer: "Refer",
   Profile: "Profile",
 };
 
@@ -61,8 +53,6 @@ function MainTabs() {
     >
       <Tabs.Screen name="Overview" component={OverviewScreen} />
       <Tabs.Screen name="Roadmap" component={RoadmapScreen} />
-      <Tabs.Screen name="Matches" component={MatchesScreen} />
-      <Tabs.Screen name="Refer" component={ReferScreen} />
       <Tabs.Screen name="Profile" component={ProfileScreen} />
     </Tabs.Navigator>
   );

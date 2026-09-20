@@ -3,8 +3,6 @@ import type { NavigatorScreenParams } from "@react-navigation/native";
 export type TabParamList = {
   Overview: undefined;
   Roadmap: undefined;
-  Matches: undefined;
-  Refer: undefined;
   Profile: undefined;
 };
 

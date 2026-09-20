@@ -10,7 +10,6 @@ import {
   BarChart3,
   Bell,
   BookOpen,
-  Bot,
   BriefcaseBusiness,
   Check,
   ChevronRight,
@@ -77,9 +76,7 @@ const navItems: { key: NavKey; label: string; icon: LucideIcon; adminOnly?: bool
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "profile", label: "My profile", icon: UserRound },
   { key: "roadmap", label: "Skill roadmap", icon: Target },
-  { key: "matches", label: "Job matches", icon: BriefcaseBusiness },
   { key: "practice", label: "Practice room", icon: Code2 },
-  { key: "refer", label: "Refer & Earn", icon: UsersRound },
   { key: "admin", label: "Admin withdrawals", icon: ShieldCheck, adminOnly: true },
 ];
 
@@ -416,20 +413,9 @@ export default function Home() {
             <button key={key} className={`nav-item ${activeView === key ? "is-active" : ""}`} onClick={() => changeView(key)}>
               <Icon size={17} />
               <span>{label}</span>
-              {key === "matches" ? null : null}
             </button>
           ))}
         </nav>
-
-        <div className="sidebar-label sidebar-label--lower">Your season</div>
-        <div className="season-card">
-          <div className="season-card__icon"><Flame size={16} /></div>
-          <div>
-            <strong>Placement season</strong>
-            <span>Week 06 of 12</span>
-          </div>
-          <div className="season-progress"><span style={{ width: "51%" }} /></div>
-        </div>
 
         <div className="sidebar-spacer" />
         <button className={`help-link ${helpOpen ? "is-active" : ""}`} onClick={() => setHelpOpen(true)}>
@@ -468,7 +454,6 @@ export default function Home() {
             <>
               <section className="welcome-row">
                 <div>
-                  <p className="eyebrow eyebrow--green"><span className="status-dot" /> SPRINT 06 · PLACEMENT SEASON</p>
                   <h1>{timeGreeting}, {firstName}<span className="heading-dot">.</span></h1>
                 </div>
                 <button className="primary-button" onClick={() => changeView("roadmap")}><Sparkles size={16} /> Continue roadmap <ArrowUpRight size={16} /></button>
@@ -672,11 +657,10 @@ function PracticeView({ onBack, hasResume, onUpload, skills, extraction }: { onB
   // Keep the lazily-loaded drawer mounted after first open so chat state survives close/reopen.
   const [agentMounted, setAgentMounted] = useState(false);
   const openAgent = (prompt: string | null = null) => { setAgentPrompt(prompt); setAgentMounted(true); setAgentOpen(true); };
-  const agentCard = <section className="panel ai-agent-card"><div className="ai-agent-card__icon"><Bot size={20} /></div><div className="ai-agent-card__copy"><strong>Nk</strong><p>Personalized career &amp; interview assistant, grounded in your resume.</p></div><button className="dark-button" onClick={() => openAgent()}><Bot size={15} /> Nk</button></section>;
   const agentDrawer = agentMounted ? <Suspense fallback={null}><AiAgentDrawer open={agentOpen} onClose={() => setAgentOpen(false)} hasResume={hasResume} onUpload={onUpload} initialPrompt={agentPrompt} /></Suspense> : null;
   if (!hasResume || !extraction) {
-    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div>{agentCard}<div className="admin-empty locked-state"><Code2 size={28} /><strong>Upload your resume to unlock practice drills</strong><p>Practice drills are tailored to your current skill levels. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div>{agentDrawer}</div>;
+    return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills that mirror the roles you want.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="admin-empty locked-state"><Code2 size={28} /><strong>Upload your resume to unlock practice drills</strong><p>Practice drills are tailored to your current skill levels. Upload a resume to get started.</p><button className="primary-button" onClick={onUpload}><Upload size={16} /> Upload resume</button></div>{agentDrawer}</div>;
   }
   const recommendations = buildPracticeRecommendations(extraction, skills);
-  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills built from your resume analysis — weakest skills first.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div>{agentCard}<div className="practice-section"><SectionHeading eyebrow="RECOMMENDED" title="Drills matched to your resume analysis" /><div className="practice-grid">{recommendations.map((rec, index) => { const { icon: RecIcon, modifier } = practiceCategoryIcon[rec.category]; return <div className={`practice-card${index === 0 ? " practice-card--featured" : ""}`} key={rec.id}><div className="practice-card__top"><span className={`practice-label${index === 0 ? "" : " practice-label--muted"}`}>{rec.category.toUpperCase()}{index === 0 ? " · TOP PICK" : ""}</span><div className={`practice-icon${modifier}`}><RecIcon size={18} /></div></div><h2>{rec.title}</h2><p>{rec.description}</p><span className="practice-skill"><Target size={11} /> {rec.skill}{rec.improvement ? " · focus area" : ""}</span><div className="practice-meta"><span><BookOpen size={14} /> {rec.questions}</span><span><Gauge size={14} /> {rec.difficulty}</span><span><Flame size={14} /> {rec.minutes} min</span></div><button className={index === 0 ? "dark-button" : "quiet-button quiet-button--border"} onClick={() => openAgent(`Start a "${rec.title}" practice session — quiz me on ${rec.skill} (${rec.category}, ${rec.difficulty} level).`)}>Start practice <ChevronRight size={16} /></button></div>; })}</div></div>{agentDrawer}</div>;
+  return <div className="subpage"><div className="subpage-heading"><div><p className="eyebrow eyebrow--green"><Code2 size={14} /> PRACTICE ROOM</p><h1>Practice with a point of view.</h1><p>Short, focused drills built from your resume analysis — weakest skills first.</p></div><button className="quiet-button quiet-button--border" onClick={onBack}><ChevronRight size={15} className="rotate-180" /> Back to overview</button></div><div className="practice-section"><SectionHeading eyebrow="RECOMMENDED" title="Drills matched to your resume analysis" /><div className="practice-grid">{recommendations.map((rec, index) => { const { icon: RecIcon, modifier } = practiceCategoryIcon[rec.category]; return <div className={`practice-card${index === 0 ? " practice-card--featured" : ""}`} key={rec.id}><div className="practice-card__top"><span className={`practice-label${index === 0 ? "" : " practice-label--muted"}`}>{rec.category.toUpperCase()}{index === 0 ? " · TOP PICK" : ""}</span><div className={`practice-icon${modifier}`}><RecIcon size={18} /></div></div><h2>{rec.title}</h2><p>{rec.description}</p><span className="practice-skill"><Target size={11} /> {rec.skill}{rec.improvement ? " · focus area" : ""}</span><div className="practice-meta"><span><BookOpen size={14} /> {rec.questions}</span><span><Gauge size={14} /> {rec.difficulty}</span><span><Flame size={14} /> {rec.minutes} min</span></div><button className={index === 0 ? "dark-button" : "quiet-button quiet-button--border"} onClick={() => openAgent(`Start a "${rec.title}" practice session — quiz me on ${rec.skill} (${rec.category}, ${rec.difficulty} level).`)}>Start practice <ChevronRight size={16} /></button></div>; })}</div></div>{agentDrawer}</div>;
 }
